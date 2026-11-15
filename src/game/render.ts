@@ -399,15 +399,21 @@ function drawDistantTrees(
     const base = 209 + hashRange(9101 + seedBase, i, -5, 4)
     const h = minH + hashRange(9102 + seedBase, i, 0, maxH - minH)
     const half = 2 + hashRange(9103 + seedBase, i, 0, 3.4)
+    
     ctx.fillStyle = color
+    // Draw trunk/center vertical line
     ctx.fillRect(x, Math.round(base - h), 1, Math.round(h))
+    
+    // Draw foliage rows from top to bottom of the canopy section
     for (let row = 0; row < h * 0.74; row += 2) {
-      const spread = Math.max(1, ((h * 0.74 - row) / (h * 0.74)) * (half + 4))
+      // FIXED: spread increases as row increases (narrow top, wide base)
+      const spread = Math.max(1, (row / (h * 0.74)) * (half + 4))
       const width = Math.round(spread)
       ctx.fillRect(x - width, Math.round(base - h + row + h * 0.26), width * 2 + 1, 2)
     }
   }
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // Cached glows
