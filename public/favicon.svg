@@ -1,9 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
-  <rect width="16" height="16" fill="#070b12"/>
-  <rect x="2" y="9" width="12" height="2" fill="#6f8296"/>
-  <rect x="3" y="11" width="2" height="3" fill="#f0b45a"/>
-  <rect x="11" y="11" width="2" height="3" fill="#f0b45a"/>
-  <rect x="6" y="3" width="7" height="5" fill="#e8dfc6"/>
-  <rect x="8" y="4" width="2" height="2" fill="#b4472f"/>
-  <rect x="4" y="5" width="2" height="4" fill="#e8dfc6"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- Deep dark slate backdrop -->
+  <rect width="16" height="16" rx="2" fill="#070b12" />
+  <rect x="1" y="1" width="14" height="14" fill="#0c131e" />
+
+  <!-- Corner tactical crosshair brackets -->
+  <rect x="1" y="1" width="3" height="1" fill="#52b788" />
+  <rect x="1" y="1" width="1" height="3" fill="#52b788" />
+
+  <rect x="12" y="1" width="3" height="1" fill="#52b788" />
+  <rect x="14" y="1" width="1" height="3" fill="#52b788" />
+
+  <rect x="1" y="14" width="3" height="1" fill="#52b788" />
+  <rect x="1" y="12" width="1" height="3" fill="#52b788" />
+
+  <rect x="12" y="14" width="3" height="1" fill="#52b788" />
+  <rect x="14" y="12" width="1" height="3" fill="#52b788" />
+
+  <!-- Crossed wooden planks (barricade) behind skull -->
+  <rect x="2" y="11" width="12" height="2" fill="#8d5a33" />
+  <rect x="2" y="11" width="12" height="1" fill="#e0a86b" />
+  <rect x="4" y="11" width="1" height="2" fill="#4a2d18" />
+  <rect x="11" y="11" width="1" height="2" fill="#4a2d18" />
+
+  <!-- Pixel Skull Emblem -->
+  <rect x="4" y="2" width="8" height="2" fill="#d5dce0" />
+  <rect x="3" y="4" width="10" height="4" fill="#d5dce0" />
+  <rect x="4" y="8" width="8" height="2" fill="#b8c4cc" />
+  <rect x="5" y="10" width="6" height="2" fill="#8f9ea8" />
+
+  <!-- Skull Top Highlight -->
+  <rect x="5" y="2" width="5" height="1" fill="#ffffff" />
+
+  <!-- Eye Sockets & Nose Cutouts -->
+  <rect x="5" y="5" width="2" height="2" fill="#070b12" />
+  <rect x="9" y="5" width="2" height="2" fill="#070b12" />
+  <rect x="7" y="8" width="2" height="1" fill="#070b12" />
+
+  <!-- Teeth Dividers -->
+  <rect x="6" y="10" width="1" height="2" fill="#070b12" />
+  <rect x="9" y="10" width="1" height="2" fill="#070b12" />
 </svg>
