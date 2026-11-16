@@ -26,6 +26,9 @@ export type ZombieType = 'walker' | 'runner' | 'brute'
 
 export type ZombieState = 'idle' | 'chase' | 'attack' | 'die'
 
+/** How the world reads in a given stretch of track. */
+export type District = 'rail' | 'village' | 'woods' | 'yard' | 'outskirts' | 'graveyard'
+
 export interface Player {
   x: number
   /** Feet position. */
@@ -84,6 +87,12 @@ export interface Zombie {
   onGround: boolean
   seed: number
   deathDuration: number
+  /** Which side of the player this one entered from. */
+  spawnSide: 1 | -1
+  /** Countdown until this zombie notices the player regardless of distance. */
+  wakeDelay: number
+  /** Short catch-up burst used by flankers so they can close a running gap. */
+  sprint: number
 }
 
 export interface Bullet {
@@ -151,6 +160,11 @@ export type PropKind =
   | 'rock'
   | 'carriage'
   | 'waterTower'
+  | 'bench'
+  | 'trashCan'
+  | 'barrel'
+  | 'crate'
+  | 'gravestone'
 
 export type PropDepth = 'back' | 'mid' | 'front'
 
@@ -167,6 +181,7 @@ export interface TerrainChunk {
   index: number
   startX: number
   props: Prop[]
+  district: District
 }
 
 export interface Toast {

@@ -40,7 +40,6 @@ import type {
 } from './types'
 
 const PLAYER_START_X = 200
-const SPAWN_OFFSCREEN = 42
 
 function approach(value: number, target: number, amount: number): number {
   if (value < target) return Math.min(target, value + amount)
@@ -160,11 +159,19 @@ export class GameEngine {
   spawnTimer = 1.8
   toast: Toast | null = null
   weldCooldown = 0
+  /** World-space point the mouse is currently over. */
+  aimWorldX = PLAYER_START_X + 140
+  aimWorldY = VIEW_H * 0.55
+  /** Id of the zombie currently under the reticle, if any. */
+  aimTargetId: number | null = null
+  /** Short-lived cross at a confirmed projectile hit. */
+  hitMarker: { x: number; y: number; life: number } | null = null
   private toastId = 0
   private zombieId = 1
   private pickupId = 1
   private lastHitSound = 0
   private aimAngle = 0
+  private nextSpawnSide: 1 | -1 = 1
 
   constructor() {
     this.reset('menu', newSeed())
@@ -198,6 +205,11 @@ export class GameEngine {
     this.weldCooldown = 0
     this.shake = 0
     this.flash = 0
+    this.aimWorldX = PLAYER_START_X + VIEW_W * 0.3
+    this.aimWorldY = ground - 20
+    this.aimTargetId = null
+    this.hitMarker = null
+    this.nextSpawnSide = 1
     this.ensureChunks()
   }
 
@@ -380,7 +392,13 @@ export class GameEngine {
     this.updatePickups(dt)
     this.updateCombo(dt)
     this.refreshChunks()
-    this.maxProgress = Math.max(this.maxProgress, p.x - this.startX)
+    // Distance measures how far you have explored in either direction.
+    this.maxProgress = Math.max(this.maxProgress, Math.abs(p.x - this.startX))
+
+    if (this.hitMarker) {
+      this.hitMarker.life -= dt
+      if (this.hitMarker.life <= 0) this.hitMarker = null
+    }
 
     const nextWave = 1 + Math.floor(this.elapsed / 42)
     if (nextWave > this.wave) {
@@ -398,40 +416,95 @@ export class GameEngine {
 
   private updateAim(): void {
     const p = this.player
+    const pivot = this.aimPivot()
     const wx = this.cameraX + this.input.aimX
     const wy = this.input.aimY
-    const cx = p.x
-    const cy = p.y - p.h * 0.58
-    if (Math.hypot(wx - cx, wy - cy) > 9) {
-      this.aimAngle = Math.atan2(wy - cy, wx - cx)
-    }
+    this.aimWorldX = wx
+    this.aimWorldY = wy
+    this.aimTargetId = null
+
     if (this.input.mouseActive) {
+      const dx = wx - pivot.x
+      const dy = wy - pivot.y
+      if (dx * dx + dy * dy > 64) {
+        this.aimAngle = Math.atan2(dy, dx)
+      }
       p.aim = this.aimAngle
-      if (Math.abs(Math.cos(p.aim)) > 0.25) {
+      if (Math.abs(Math.cos(p.aim)) > 0.18) {
         p.facing = Math.cos(p.aim) >= 0 ? 1 : -1
       }
-    } else {
-      // Keyboard / touch fallback: snap aim to the closest threat when firing.
-      let target: Zombie | null = null
-      let best = 260
-      if (this.input.fire) {
-        for (const z of this.zombies) {
-          if (z.state === 'die') continue
-          const d = Math.hypot(z.x - p.x, z.y - z.h * 0.5 - (p.y - p.h * 0.58))
-          if (d < best) {
-            best = d
-            target = z
-          }
+
+      // Highlight the zombie directly under the crosshair for clear feedback.
+      let hover: Zombie | null = null
+      for (const z of this.zombies) {
+        if (z.state === 'die') continue
+        if (
+          wx > z.x - z.w * 0.5 - 3 &&
+          wx < z.x + z.w * 0.5 + 3 &&
+          wy > z.y - z.h - 3 &&
+          wy < z.y + 3
+        ) {
+          hover = z
+          break
         }
       }
-      if (target) {
-        const tx = target.x - p.x
-        const ty = target.y - target.h * 0.5 - (p.y - p.h * 0.58)
-        p.aim = Math.atan2(ty, tx)
-        p.facing = tx >= 0 ? 1 : -1
-      } else {
-        p.aim = p.facing === 1 ? 0 : Math.PI
+      if (hover) this.aimTargetId = hover.id
+      return
+    }
+
+    // Keyboard / touch fallback: track the closest live threat automatically.
+    let target: Zombie | null = null
+    let best = 300
+    for (const z of this.zombies) {
+      if (z.state === 'die') continue
+      const d = Math.hypot(z.x - pivot.x, z.y - z.h * 0.52 - pivot.y)
+      if (d < best) {
+        best = d
+        target = z
       }
+    }
+    if (target) {
+      const tx = target.x
+      const ty = target.y - target.h * 0.52
+      this.aimWorldX = tx
+      this.aimWorldY = ty
+      this.aimTargetId = target.id
+      p.aim = Math.atan2(ty - pivot.y, tx - pivot.x)
+      p.facing = tx >= pivot.x ? 1 : -1
+    } else {
+      this.aimWorldX = pivot.x + p.facing * 260
+      this.aimWorldY = pivot.y
+      p.aim = p.facing === 1 ? 0 : Math.PI
+    }
+  }
+
+  /** Hand pivot used by the survivor sprite and by every projectile. */
+  aimPivot(): { x: number; y: number } {
+    const p = this.player
+    return { x: p.x, y: p.y - (p.crouching ? 15 : 21) }
+  }
+
+  /** Current angular spread, shared by the attack and the drawn crosshair. */
+  weaponSpread(): number {
+    const p = this.player
+    const weapon = WEAPONS[p.weapon]
+    if (weapon.kind === 'melee') return 0
+    return (
+      weapon.spread *
+      (p.crouching ? 0.4 : 1) *
+      (p.moving ? 1.5 : 1) *
+      (p.onGround ? 1 : 1.25)
+    )
+  }
+
+  /** Barrel tip in world space, matched to the weapon sprite dimensions. */
+  muzzlePoint(): { x: number; y: number } {
+    const p = this.player
+    const pivot = this.aimPivot()
+    const barrel = p.weapon === 'pistol' ? 14 : 21
+    return {
+      x: pivot.x + Math.cos(p.aim) * barrel,
+      y: pivot.y + Math.sin(p.aim) * barrel,
     }
   }
 
@@ -525,7 +598,6 @@ export class GameEngine {
     if (p.hurt > 0.22 && p.onGround) {
       p.vx = approach(p.vx, 0, 260 * dt)
     }
-    p.x = Math.max(-100000, Math.min(100000, p.x))
   }
 
   private attack(): void {
@@ -573,15 +645,14 @@ export class GameEngine {
       return
     }
 
-    const spread =
-      weapon.spread *
-      (p.crouching ? 0.4 : 1) *
-      (p.moving ? 1.5 : 1) *
-      (p.onGround ? 1 : 1.25)
-    const angle = p.aim + randRange(-spread, spread)
-    const originY = p.y - p.h * (p.crouching ? 0.5 : 0.56)
-    const mx = p.x + Math.cos(angle) * 12
-    const my = originY + Math.sin(angle) * 12
+    const spread = this.weaponSpread()
+    const muzzle = this.muzzlePoint()
+    const toX = this.aimWorldX - muzzle.x
+    const toY = this.aimWorldY - muzzle.y
+    const baseAngle = Math.hypot(toX, toY) > 2 ? Math.atan2(toY, toX) : p.aim
+    const angle = baseAngle + randRange(-spread, spread)
+    const mx = muzzle.x
+    const my = muzzle.y
 
     this.bullets.push({
       x: mx,
@@ -622,7 +693,7 @@ export class GameEngine {
     }
     this.particles.push({
       x: p.x - Math.cos(angle) * 3,
-      y: originY,
+      y: muzzle.y,
       vx: randRange(-28, 28) - Math.cos(angle) * 15,
       vy: randRange(-55, -20),
       life: 0.45,
@@ -649,7 +720,7 @@ export class GameEngine {
     if (this.spawnTimer <= 0) {
       if (alive < cap && this.zombies.length < ZOMBIE_CAP) {
         this.spawnZombie()
-        if (this.elapsed > 45 && Math.random() < 0.35 && alive + 1 < cap) {
+        if (this.elapsed > 20 && Math.random() < 0.35 && alive + 1 < cap) {
           this.spawnZombie()
         }
       }
@@ -665,15 +736,21 @@ export class GameEngine {
     return 'walker'
   }
 
-  private spawnZombie(): void {
+  /** Strict left/right alternation so pressure always arrives from both sides. */
+  private spawnZombie(sideOverride?: 1 | -1): void {
     const type = this.pickZombieType()
     const stats = ZOMBIE_STATS[type]
-    const side = Math.random() < 0.5 ? -1 : 1
+    const side = sideOverride ?? this.nextSpawnSide
+    if (!sideOverride) this.nextSpawnSide = side === 1 ? -1 : 1
+
     const x =
       side < 0
-        ? this.cameraX - SPAWN_OFFSCREEN - Math.random() * 40
-        : this.cameraX + VIEW_W + SPAWN_OFFSCREEN + Math.random() * 40
+        ? this.cameraX - 14 - Math.random() * 34
+        : this.cameraX + VIEW_W + 14 + Math.random() * 34
     const ground = groundHeightAt(this.seed, x)
+    const p = this.player
+    const behind =
+      (p.vx > 25 && x < p.x - 90) || (p.vx < -25 && x > p.x + 90)
     this.zombies.push({
       id: this.zombieId++,
       type,
@@ -698,13 +775,21 @@ export class GameEngine {
       onGround: true,
       seed: Math.random(),
       deathDuration: stats.deathDuration,
+      spawnSide: side,
+      // Flankers wake quickly; everyone eventually hunts instead of idling
+      // off-screen forever while the survivor runs away.
+      wakeDelay: behind ? 0.5 + Math.random() * 1 : 1.8 + Math.random() * 3.2,
+      sprint: behind && type !== 'brute' ? 8 + Math.random() * 6 : 0,
     })
   }
 
   private spawnBurst(count: number): void {
+    let side: 1 | -1 = this.nextSpawnSide
     for (let i = 0; i < count; i += 1) {
-      this.spawnZombie()
+      this.spawnZombie(side)
+      side = side === 1 ? -1 : 1
     }
+    this.nextSpawnSide = side
   }
 
   private updateZombies(dt: number): void {
@@ -727,12 +812,15 @@ export class GameEngine {
       const dx = p.x - z.x
       const dist = Math.abs(dx)
       const dir = dx >= 0 ? 1 : -1
+      z.wakeDelay -= dt
+      if (z.sprint > 0) z.sprint -= dt
 
       if (z.state === 'idle') {
         z.vx = approach(z.vx, 0, 260 * dt)
         const notice = crouched ? 120 : 310
-        if (dist < notice || p.noise > 0.9 && dist < 470) {
+        if (z.wakeDelay <= 0 || dist < notice || (p.noise > 0.9 && dist < 470)) {
           z.state = 'chase'
+          z.facing = dir
         }
       } else if (z.state === 'chase') {
         z.facing = dir
@@ -743,8 +831,13 @@ export class GameEngine {
           z.hasStruck = false
           z.vx = 0
         } else {
-          const target = dir * z.speed
-          z.vx = approach(z.vx, target, 420 * dt)
+          // A flanking zombie gets a short lope so it can actually reach a
+          // survivor who is sprinting away, instead of drifting off-screen.
+          const sprinting = z.sprint > 0 && dist > 20
+          const speed = sprinting
+            ? Math.min(175, Math.max(z.speed * 5.6, Math.abs(p.vx) + 40))
+            : z.speed
+          z.vx = approach(z.vx, dir * speed, 420 * dt)
         }
       } else if (z.state === 'attack') {
         z.vx = approach(z.vx, 0, 900 * dt)
@@ -785,12 +878,18 @@ export class GameEngine {
         z.onGround = false
       }
 
-      if (z.x < this.cameraX - 560 || z.x > this.cameraX + VIEW_W + 560) {
+      if (z.x < this.cameraX - 820 || z.x > this.cameraX + VIEW_W + 820) {
         z.hp = -999
       }
     }
 
     // Soft separation so the horde doesn't stack into one sprite.
+    //
+    // Important: pushing both zombies apart equally would make a fast flanker
+    // match the pace of a slow walker it is stuck behind, so the whole cluster
+    // would crawl slower than the survivor and never catch up. Instead the
+    // rear zombie shoves the one in front of it forward (toward the survivor);
+    // only a zombie that is already attacking is treated as a solid blocker.
     for (let i = 0; i < this.zombies.length; i += 1) {
       const a = this.zombies[i]
       if (a.state === 'die') continue
@@ -800,10 +899,18 @@ export class GameEngine {
         const dx = b.x - a.x
         const min = (a.w + b.w) * 0.5 + 1
         if (Math.abs(dx) < min && Math.abs(a.y - b.y) < 12) {
-          const push = (min - Math.abs(dx)) * 0.5 + 0.1
-          const sign = dx >= 0 ? 1 : -1
-          a.x -= push * sign
-          b.x += push * sign
+          const overlap = min - Math.abs(dx)
+          const front = Math.abs(a.x - p.x) <= Math.abs(b.x - p.x) ? a : b
+          const rear = front === a ? b : a
+          const away = Math.sign(front.x - rear.x) || 1
+          const frontDistance = Math.abs(front.x - p.x)
+          const blocked = front.state === 'attack' || frontDistance < 22
+          if (blocked) {
+            // Queue up behind an attacker instead of shoving it through the player.
+            rear.x -= away * Math.min(overlap, 1.2)
+          } else {
+            front.x += away * (overlap + 0.05)
+          }
         }
       }
     }
@@ -984,6 +1091,7 @@ export class GameEngine {
           )
         ) {
           this.damageZombie(z, b.damage, Math.sign(b.vx), b.x, b.y)
+          this.hitMarker = { x: b.x, y: b.y, life: 0.14 }
           this.burst(b.x, b.y, 3, {
             color: PALETTE.amber,
             speed: 55,
@@ -1069,11 +1177,10 @@ export class GameEngine {
   private updateCamera(dt: number): void {
     if (this.phase === 'dead' || this.phase === 'paused') return
     const p = this.player
-    let target = p.x - VIEW_W * 0.42 + p.facing * 12
-    if (this.phase === 'playing') {
-      const look = clamp((this.input.aimX - VIEW_W * 0.5) * 0.08, -24, 24)
-      target += look
-    }
+    // Stable framing: only movement nudges the camera, never the aim. This
+    // keeps the screen-to-world mapping under the cursor perfectly still.
+    const lead = clamp(p.vx * 0.16, -14, 14)
+    const target = p.x - VIEW_W * 0.42 + lead
     const smooth = 1 - Math.exp(-7.5 * dt)
     this.cameraX += (target - this.cameraX) * smooth
   }

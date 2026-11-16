@@ -295,48 +295,172 @@ function drawRidge(
   void time
 }
 
-function drawTown(ctx: CanvasRenderingContext2D, camX: number, time: number): void {
-  const parallax = 0.26
-  const spacing = 236
-  const first = Math.floor((camX * parallax - 120) / spacing)
-  ctx.globalAlpha = 0.9
-  for (let i = first; i < first + 4; i += 1) {
-    const screenX = i * spacing - camX * parallax
-    const rand = hash01(7100, i)
-    if (rand < 0.22) continue
-    const baseY = 201 + hashRange(7101, i, -3, 4)
-    const w = 26 + hashRange(7102, i, 0, 40)
-    const h = 13 + hashRange(7103, i, 0, 24)
-    ctx.fillStyle = '#0a121b'
-    ctx.fillRect(Math.round(screenX), Math.round(baseY - h), Math.round(w), Math.round(h))
-    if (rand > 0.55) {
-      ctx.fillRect(Math.round(screenX + w * 0.5), Math.round(baseY - h - 10), 3, 10)
-      // drifting smoke
-      ctx.globalAlpha = 0.18
-      ctx.fillStyle = '#3b4a5b'
-      for (let s = 0; s < 3; s += 1) {
-        const drift = ((time * 3 + s * 5 + i * 9) % 18)
-        ctx.fillRect(
-          Math.round(screenX + w * 0.5 + drift * 0.35 + s * 2),
-          Math.round(baseY - h - 12 - drift),
-          3,
-          2,
-        )
-      }
-      ctx.globalAlpha = 0.9
-      ctx.fillStyle = '#0a121b'
+function drawHauntedVillage(ctx: CanvasRenderingContext2D, camX: number, time: number, seed: number): void {
+  const s = seed >>> 0
+
+  // Far hamlet: a low, almost abstract ridge of rooftops.
+  const farParallax = 0.17
+  const farSpacing = 152
+  const farFirst = Math.floor((camX * farParallax - 100) / farSpacing)
+  ctx.fillStyle = '#08111a'
+  ctx.globalAlpha = 0.7
+  for (let i = farFirst; i < farFirst + 6; i += 1) {
+    if (hash01(s ^ 0x51a7, i) < 0.24) continue
+    const x = Math.round(i * farSpacing - camX * farParallax + hashRange(s ^ 0x51a8, i, -40, 40))
+    const w = Math.round(12 + hashRange(s ^ 0x51a9, i, 0, 30))
+    const h = Math.round(8 + hashRange(s ^ 0x51aa, i, 0, 16))
+    const baseY = 202 + Math.round(hashRange(s ^ 0x51ab, i, -2, 3))
+    ctx.fillRect(x, baseY - h, w, h)
+    if (hash01(s ^ 0x51ac, i) > 0.64) {
+      ctx.fillRect(x + Math.round(w * 0.5), baseY - h - 5, 2, 5)
+      // steeple
+      ctx.fillRect(x + Math.round(w * 0.5) - 2, baseY - h - 4, 6, 1)
     }
-    // Sparse lit windows.
-    ctx.fillStyle = PALETTE.windowDim
-    for (let wy = 4; wy < h - 3; wy += 6) {
-      for (let wx = 4; wx < w - 3; wx += 7) {
-        if (hash01(7200 + i * 17 + wx + wy, i) > 0.72) {
-          ctx.fillRect(Math.round(screenX + wx), Math.round(baseY - h + wy), 1, 2)
-        }
-      }
+    if (hash01(s ^ 0x51ad, i) > 0.72) {
+      ctx.fillStyle = '#8f6534'
+      ctx.fillRect(x + 3 + Math.round(hashRange(s ^ 0x51ae, i, 0, Math.max(1, w - 6))), baseY - h + 3, 1, 2)
+      ctx.fillStyle = '#08111a'
     }
   }
   ctx.globalAlpha = 1
+
+  // Near village clusters: crooked houses, a chapel, crooked fences,
+  // graveyard markers, dead trees and drifting spectral lights.
+  const parallax = 0.31
+  const spacing = 330
+  const first = Math.floor((camX * parallax - 300) / spacing)
+  for (let ci = first; ci < first + 5; ci += 1) {
+    if (hash01(s ^ 0x7a11, ci) < 0.22) continue
+    const clusterX = ci * spacing - camX * parallax + hashRange(s ^ 0x7a12, ci, -54, 54)
+    const baseY = 205.5 + hashRange(s ^ 0x7a13, ci, -2, 2)
+    const houseCount = 1 + Math.floor(hash01(s ^ 0x7a14, ci) * 2)
+
+    ctx.globalAlpha = 0.92
+    // Crooked fence in front of some plots.
+    if (hash01(s ^ 0x7a15, ci) > 0.45) {
+      const fenceX = Math.round(clusterX - 34)
+      ctx.fillStyle = '#080e14'
+      for (let i = 0; i < 52; i += 7) {
+        const h = 5 + Math.round(hash01(s ^ 0x7a16, ci + i) * 3)
+        ctx.fillRect(fenceX + i, Math.round(baseY - h), 1, h)
+      }
+      ctx.fillRect(fenceX, Math.round(baseY - 3), 50, 1)
+    }
+
+    // A handful of headstones huddle beside the houses.
+    const graves = Math.floor(hash01(s ^ 0x7a17, ci) * 5)
+    for (let g = 0; g < graves; g += 1) {
+      const gx = Math.round(clusterX + 54 + g * (5 + hashRange(s ^ 0x7a18, ci + g, 0, 5)))
+      const gh = 3 + Math.round(hash01(s ^ 0x7a19, ci + g) * 3)
+      ctx.fillStyle = '#0a1017'
+      ctx.fillRect(gx, Math.round(baseY - gh), 2, gh)
+      if (hash01(s ^ 0x7a1a, ci + g) > 0.5) ctx.fillRect(gx - 1, Math.round(baseY - gh + 1), 4, 1)
+    }
+
+    for (let hi = 0; hi < houseCount; hi += 1) {
+      const hx = Math.round(clusterX + hi * (28 + hashRange(s ^ 0x7a1b, ci + hi, 0, 22)))
+      const w = Math.round(17 + hashRange(s ^ 0x7a1c, ci + hi, 0, 22))
+      const h = Math.round(14 + hashRange(s ^ 0x7a1d, ci + hi, 0, 20))
+      const top = Math.round(baseY - h)
+      const body = hi % 2 === 0 ? '#0a131d' : '#0c1621'
+      ctx.fillStyle = body
+      ctx.fillRect(hx, top, w, h)
+      // Gabled / broken roofline.
+      ctx.fillStyle = '#070d14'
+      const peak = Math.round(w * 0.5)
+      ctx.fillRect(hx - 2, top, w + 4, 2)
+      ctx.fillRect(hx + peak - 3, top - 5, 6, 5)
+      ctx.fillRect(hx + peak - 1, top - 9, 2, 4)
+      ctx.fillStyle = 'rgba(148, 172, 184, 0.14)'
+      ctx.fillRect(hx - 2, top, w + 4, 1)
+      ctx.fillRect(hx + peak - 3, top - 5, 6, 1)
+      if (hash01(s ^ 0x7a1e, ci + hi) > 0.6) {
+        ctx.fillStyle = '#070d14'
+        ctx.fillRect(hx + peak + 6, top - 7, 2, 7) // chimney
+      }
+      // Windows, some lit by something that should not be awake.
+      const lit = hash01(s ^ 0x7a1f, ci + hi) > 0.42
+      const flicker = 0.72 + 0.28 * Math.sin(time * 3 + ci * 2.1 + hi)
+      if (lit) {
+        ctx.fillStyle = `rgba(225,166,84,${0.55 + flicker * 0.35})`
+        ctx.fillRect(hx + 3, top + 4, 2, 3)
+        if (w > 24) ctx.fillRect(hx + w - 6, top + 4, 2, 3)
+        const glow = getGlowSprite()
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        ctx.globalAlpha = 0.14 * flicker
+        ctx.drawImage(glow, hx - 5, top - 2, 20, 20)
+        ctx.restore()
+        ctx.globalAlpha = 0.92
+      } else {
+        ctx.fillStyle = '#0e1a24'
+        ctx.fillRect(hx + 3, top + 4, 2, 3)
+        if (w > 24) ctx.fillRect(hx + w - 6, top + 4, 2, 3)
+      }
+      // Doorway and porch.
+      ctx.fillStyle = '#060b10'
+      ctx.fillRect(hx + Math.round(w * 0.46), top + h - 5, 3, 5)
+      if (hash01(s ^ 0x7a20, ci + hi) > 0.55) {
+        ctx.fillStyle = '#131b20'
+        ctx.fillRect(hx + 2, baseY - 1, w - 4, 1)
+      }
+    }
+
+    // Chapel every few clusters.
+    if (hash01(s ^ 0x7a21, ci) > 0.62) {
+      const cx = Math.round(clusterX + 34)
+      const cw = 16
+      const ch = 24
+      const top = Math.round(baseY - ch)
+      ctx.fillStyle = '#0a121b'
+      ctx.fillRect(cx, top, cw, ch)
+      ctx.fillStyle = '#070c12'
+      ctx.fillRect(cx - 2, top, cw + 4, 2)
+      // Crooked steeple + cross.
+      ctx.fillRect(cx + cw - 6, top - 11, 7, 11)
+      ctx.fillRect(cx + cw - 4, top - 16, 1, 5)
+      ctx.fillRect(cx + cw - 6, top - 14, 5, 1)
+      ctx.fillStyle = '#0e1822'
+      ctx.fillRect(cx + 3, top + 4, 4, 6)
+      if (hash01(s ^ 0x7a22, ci) > 0.4) {
+        ctx.fillStyle = 'rgba(201, 141, 74, 0.6)'
+        ctx.fillRect(cx + 4, top + 6, 2, 3)
+      }
+    }
+
+    // A dead tree leaning over the roofs.
+    const tx = Math.round(clusterX - 46)
+    const th = 18 + Math.round(hashRange(s ^ 0x7a23, ci, 0, 12))
+    ctx.fillStyle = '#070d13'
+    ctx.fillRect(tx, Math.round(baseY - th), 1, th)
+    ctx.fillRect(tx - 4, Math.round(baseY - th * 0.7), 4, 1)
+    ctx.fillRect(tx + 1, Math.round(baseY - th * 0.82), 4, 1)
+    ctx.fillRect(tx - 2, Math.round(baseY - th * 0.55), 3, 1)
+
+    // Spectral lantern drifting between the graves.
+    if (hash01(s ^ 0x7a24, ci) > 0.5) {
+      const drift = Math.sin(time * 0.55 + ci * 1.7) * 14
+      const lx = clusterX + 24 + drift
+      const ly = baseY - 9 - Math.sin(time * 0.9 + ci) * 3
+      const glow = getGlowSprite()
+      ctx.save()
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.globalAlpha = 0.22 + Math.sin(time * 2.2 + ci) * 0.06
+      ctx.drawImage(glow, lx - 9, ly - 9, 18, 18)
+      ctx.restore()
+      ctx.fillStyle = 'rgba(168,214,182,0.7)'
+      ctx.fillRect(Math.round(lx), Math.round(ly), 1, 2)
+      ctx.globalAlpha = 0.92
+    }
+  }
+  ctx.globalAlpha = 1
+
+  // Fog creeping around the village foundations.
+  ctx.fillStyle = 'rgba(86,108,116,0.055)'
+  const fogShift = (camX * 0.12 + time * 2.4) % 80
+  for (let x = -80; x < VIEW_W + 80; x += 80) {
+    ctx.fillRect(Math.round(x - fogShift), 197, 62, 8)
+  }
 }
 
 function drawPylons(ctx: CanvasRenderingContext2D, camX: number): void {
@@ -380,6 +504,7 @@ function drawPylons(ctx: CanvasRenderingContext2D, camX: number): void {
   }
   ctx.globalAlpha = 1
 }
+
 
 function drawDistantTrees(
   ctx: CanvasRenderingContext2D,
@@ -970,6 +1095,195 @@ function drawRock(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale
   ctx.fillRect(px - w / 2, baseY - 1, w, 1)
 }
 
+function drawBench(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, seed: number, variant: number): void {
+  const px = Math.round(x)
+  const w = Math.round(30 * scale)
+  const left = px - Math.round(w / 2)
+  const seatY = Math.round(baseY - 7 * scale)
+  drawShadow(ctx, px, baseY + 1, w + 4, 0.3)
+
+  // Iron frame.
+  ctx.fillStyle = '#1b2024'
+  ctx.fillRect(left + 2, seatY, 2, Math.round(baseY - seatY))
+  ctx.fillRect(left + w - 4, seatY, 2, Math.round(baseY - seatY))
+  ctx.fillRect(left + 1, seatY - 1, 3, 1)
+  ctx.fillRect(left + w - 4, baseY - 2, 4, 2)
+  ctx.fillStyle = '#2b3137'
+  ctx.fillRect(left + 3, seatY, 1, Math.round(baseY - seatY) - 1)
+
+  // Backrest.
+  ctx.fillStyle = '#151b1f'
+  ctx.fillRect(left + 2, Math.round(seatY - 13 * scale), 2, Math.round(13 * scale))
+  ctx.fillRect(left + w - 4, Math.round(seatY - 13 * scale), 2, Math.round(13 * scale))
+  for (let i = 0; i < 3; i += 1) {
+    if (variant === 1 && i === 1) continue
+    ctx.fillStyle = i === 0 ? '#4a3624' : '#3b2b1d'
+    ctx.fillRect(left + 4, Math.round(seatY - 12 * scale + i * 4), w - 8, 2)
+    ctx.fillStyle = 'rgba(190, 137, 82, 0.18)'
+    ctx.fillRect(left + 4, Math.round(seatY - 12 * scale + i * 4), w - 8, 1)
+  }
+  // Seat slats.
+  for (let i = 0; i < 3; i += 1) {
+    ctx.fillStyle = i === 1 ? '#453221' : '#332619'
+    ctx.fillRect(left + 2, seatY + 1 + i * 2, w - 4, 1)
+  }
+  ctx.fillStyle = '#5d4229'
+  ctx.fillRect(left + 2, seatY, w - 4, 1)
+  // Rust + a fallen leaf.
+  ctx.fillStyle = '#6b3b25'
+  ctx.fillRect(left + w - 8, seatY + 4, 2, 1)
+  ctx.fillStyle = seed > 0.5 ? '#6b4b2c' : '#3f3425'
+  ctx.fillRect(left + Math.round(seed * (w - 10)) + 4, seatY - 1, 2, 1)
+}
+
+function drawTrashCan(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, seed: number, variant: number): void {
+  const px = Math.round(x)
+  const w = Math.round(10 * scale)
+  const h = Math.round(14 * scale)
+  drawShadow(ctx, px, baseY + 1, w + 5, 0.28)
+
+  if (variant === 2) {
+    // Toppled bin with a spill of rubbish.
+    ctx.save()
+    ctx.translate(px, baseY - 3)
+    ctx.rotate(-0.32)
+    ctx.fillStyle = '#2b3236'
+    ctx.fillRect(-Math.round(w / 2), -h + 2, w, h - 2)
+    ctx.fillStyle = '#3a4247'
+    ctx.fillRect(-Math.round(w / 2), -h + 2, w, 2)
+    ctx.fillStyle = '#1a1f22'
+    ctx.fillRect(-Math.round(w / 2) + 1, -h + 5, w - 2, 1)
+    ctx.restore()
+    ctx.fillStyle = '#4b4030'
+    ctx.fillRect(px + 3, baseY - 2, 2, 1)
+    ctx.fillRect(px + 6, baseY - 3, 1, 2)
+    ctx.fillStyle = '#5a4a35'
+    ctx.fillRect(px + 1, baseY - 4, 2, 2)
+    return
+  }
+
+  const left = px - Math.round(w / 2)
+  const top = Math.round(baseY - h)
+  // Body.
+  ctx.fillStyle = '#262d31'
+  ctx.fillRect(left, top + 1, w, h - 1)
+  ctx.fillStyle = '#343c41'
+  ctx.fillRect(left, top + 1, w, 2)
+  ctx.fillStyle = '#1a1f22'
+  ctx.fillRect(left, baseY - 2, w, 2)
+  // Ribs.
+  ctx.fillStyle = '#1d2326'
+  ctx.fillRect(left + 1, top + 5, w - 2, 1)
+  ctx.fillRect(left + 1, top + 9, w - 2, 1)
+  ctx.fillStyle = '#3c464b'
+  ctx.fillRect(left + 1, top + 4, w - 2, 1)
+  ctx.fillRect(left + 1, top + 8, w - 2, 1)
+  // Lid + handle.
+  ctx.fillStyle = '#3f484d'
+  ctx.fillRect(left - 1, top, w + 2, 2)
+  ctx.fillStyle = '#586268'
+  ctx.fillRect(left - 1, top, w + 2, 1)
+  ctx.fillStyle = '#1b2024'
+  ctx.fillRect(px - 2, top - 1, 4, 1)
+  ctx.fillRect(px - 1, top - 2, 2, 1)
+  // Leaning bag.
+  if (seed > 0.56) {
+    ctx.fillStyle = '#171d20'
+    ctx.fillRect(left + w + 1, baseY - 4, 3, 4)
+    ctx.fillRect(left + w + 2, baseY - 5, 2, 1)
+    ctx.fillStyle = '#242c30'
+    ctx.fillRect(left + w + 1, baseY - 4, 1, 2)
+  }
+  ctx.fillStyle = '#6b3b25'
+  ctx.fillRect(left + 2, top + 6, 1, 2)
+}
+
+function drawBarrel(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, seed: number, variant: number): void {
+  const px = Math.round(x)
+  const w = Math.round(9 * scale)
+  const h = Math.round(13 * scale)
+  const left = px - Math.round(w / 2)
+  const top = Math.round(baseY - h)
+  drawShadow(ctx, px, baseY + 1, w + 4, 0.28)
+  ctx.fillStyle = variant === 0 ? '#3b2a1c' : '#26301f'
+  ctx.fillRect(left, top, w, h)
+  ctx.fillStyle = '#50351f'
+  ctx.fillRect(left + 1, top + 1, w - 2, h - 2)
+  ctx.fillStyle = '#6d4a2a'
+  ctx.fillRect(left + 1, top + 1, 1, h - 2)
+  ctx.fillStyle = '#201811'
+  ctx.fillRect(left, top, w, 1)
+  ctx.fillRect(left, baseY - 1, w, 1)
+  ctx.fillStyle = '#77838a'
+  ctx.fillRect(left - 1, top + 3, w + 2, 1)
+  ctx.fillRect(left - 1, top + h - 5, w + 2, 1)
+  ctx.fillStyle = '#4a3a24'
+  ctx.fillRect(left + 2, top + 6, 2, 2)
+  if (seed > 0.5) {
+    ctx.fillStyle = '#1e2820'
+    ctx.fillRect(left + 4, top + 8, 3, 1)
+  }
+}
+
+function drawCrate(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, seed: number, variant: number): void {
+  const px = Math.round(x)
+  const w = Math.round(12 * scale)
+  const h = Math.round(10 * scale)
+  const left = px - Math.round(w / 2)
+  const top = Math.round(baseY - h)
+  drawShadow(ctx, px, baseY + 1, w + 3, 0.28)
+  ctx.fillStyle = '#3a2a1b'
+  ctx.fillRect(left, top, w, h)
+  ctx.fillStyle = '#4c3823'
+  ctx.fillRect(left + 1, top + 1, w - 2, h - 2)
+  ctx.fillStyle = '#2b1f14'
+  ctx.fillRect(left + 1, top + Math.round(h / 2) - 1, w - 2, 1)
+  ctx.fillRect(left + Math.round(w / 2) - 1, top + 1, 1, h - 2)
+  if (variant === 0) {
+    ctx.strokeStyle = '#5d462c'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(left + 1, top + h - 2)
+    ctx.lineTo(left + w - 2, top + 1)
+    ctx.stroke()
+  }
+  ctx.fillStyle = '#6b4f30'
+  ctx.fillRect(left + 1, top + 1, w - 2, 1)
+  if (seed > 0.6) {
+    ctx.fillStyle = '#8d7b53'
+    ctx.fillRect(left + 3, top + 3, 2, 1)
+  }
+}
+
+function drawGravestone(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, seed: number, variant: number): void {
+  const px = Math.round(x)
+  const w = Math.max(3, Math.round(6 * scale))
+  const h = Math.round((7 + seed * 5) * scale)
+  const left = px - Math.round(w / 2)
+  const top = Math.round(baseY - h)
+  drawShadow(ctx, px, baseY + 1, w + 4, 0.24)
+  ctx.fillStyle = '#3a4044'
+  ctx.fillRect(left, top + 1, w, h - 1)
+  ctx.fillStyle = '#4b5257'
+  ctx.fillRect(left + 1, top, w - 2, 1)
+  ctx.fillRect(left, top + 1, 1, h - 2)
+  ctx.fillStyle = '#23292c'
+  ctx.fillRect(left + w - 1, top + 1, 1, h - 2)
+  ctx.fillRect(left, baseY - 1, w, 1)
+  if (variant === 1) {
+    // Cross marker.
+    ctx.fillStyle = '#434a4e'
+    ctx.fillRect(px - 1, top - 3, 2, 4)
+    ctx.fillRect(px - 3, top - 2, 6, 1)
+  } else {
+    ctx.fillStyle = '#2a3033'
+    ctx.fillRect(left + 1, top + Math.round(h * 0.4), w - 2, 1)
+    ctx.fillRect(left + 1, top + Math.round(h * 0.55), Math.max(1, w - 4), 1)
+  }
+  ctx.fillStyle = '#313a2c'
+  ctx.fillRect(left, baseY - 1, 1, 2)
+}
+
 function drawProp(ctx: CanvasRenderingContext2D, prop: Prop, seed: number, time: number): void {
   const baseY = groundHeightAt(seed, prop.x)
   const scale =
@@ -1017,6 +1331,21 @@ function drawProp(ctx: CanvasRenderingContext2D, prop: Prop, seed: number, time:
       break
     case 'rock':
       drawRock(ctx, prop.x, baseY + 2, scale, prop.seed)
+      break
+    case 'bench':
+      drawBench(ctx, prop.x, baseY + 2, scale, prop.seed, prop.variant)
+      break
+    case 'trashCan':
+      drawTrashCan(ctx, prop.x, baseY + 2, scale, prop.seed, prop.variant)
+      break
+    case 'barrel':
+      drawBarrel(ctx, prop.x, baseY + 2, scale, prop.seed, prop.variant)
+      break
+    case 'crate':
+      drawCrate(ctx, prop.x, baseY + 2, scale, prop.seed, prop.variant)
+      break
+    case 'gravestone':
+      drawGravestone(ctx, prop.x, baseY + 2, scale, prop.seed, prop.variant)
       break
     default:
       break
@@ -1505,10 +1834,13 @@ function drawReticle(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   const p = engine.player
   const x = Math.round(engine.input.aimX)
   const y = Math.round(engine.input.aimY)
-  const spread = 4 + Math.round(p.recoil * 2)
+  const pivot = engine.aimPivot()
+  const distance = Math.hypot(engine.aimWorldX - pivot.x, engine.aimWorldY - pivot.y)
+  const spread = Math.max(2, Math.min(26, Math.round(Math.tan(engine.weaponSpread()) * distance + p.recoil * 2)))
   const ammo = p.ammo[p.weapon]
   const empty = p.weapon !== 'pipe' && ammo <= 0
-  const color = empty ? '#e85540' : '#ffca78'
+  const onTarget = engine.aimTargetId !== null
+  const color = empty ? '#e85540' : onTarget ? '#ff8a66' : '#ffca78'
 
   const cross = (ox: number, oy: number, alpha: number, tint: string) => {
     ctx.globalAlpha = alpha
@@ -1527,6 +1859,50 @@ function drawReticle(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
   // Dark underlay keeps the crosshair readable over lit windows and bone-white corpses.
   cross(1, 1, 0.5, '#04070c')
   cross(0, 0, 0.95, color)
+
+  // Precise centre dot: what the barrel is actually pointing at.
+  ctx.fillStyle = '#04070c'
+  ctx.fillRect(x, y, 1, 1)
+  ctx.globalAlpha = 1
+  if (onTarget) {
+    const r = spread + 5
+    const arm = 4
+    ctx.strokeStyle = color
+    ctx.globalAlpha = 0.9
+    ctx.lineWidth = 1
+    // Corner brackets read as a target lock without boxing in the whole scene.
+    ctx.beginPath()
+    ctx.moveTo(x - r, y - r + arm)
+    ctx.lineTo(x - r, y - r)
+    ctx.lineTo(x - r + arm, y - r)
+    ctx.moveTo(x + r - arm, y - r)
+    ctx.lineTo(x + r, y - r)
+    ctx.lineTo(x + r, y - r + arm)
+    ctx.moveTo(x + r, y + r - arm)
+    ctx.lineTo(x + r, y + r)
+    ctx.lineTo(x + r - arm, y + r)
+    ctx.moveTo(x - r + arm, y + r)
+    ctx.lineTo(x - r, y + r)
+    ctx.lineTo(x - r, y + r - arm)
+    ctx.stroke()
+    ctx.globalAlpha = 1
+  }
+}
+
+function drawHitMarker(ctx: CanvasRenderingContext2D, marker: { x: number; y: number; life: number }): void {
+  const alpha = Math.max(0, Math.min(1, marker.life / 0.14))
+  const x = Math.round(marker.x)
+  const y = Math.round(marker.y)
+  ctx.globalAlpha = alpha
+  ctx.fillStyle = '#fff1c2'
+  ctx.fillRect(x - 4, y - 4, 2, 1)
+  ctx.fillRect(x + 3, y - 4, 2, 1)
+  ctx.fillRect(x - 4, y + 4, 2, 1)
+  ctx.fillRect(x + 3, y + 4, 2, 1)
+  ctx.fillRect(x - 4, y - 3, 1, 2)
+  ctx.fillRect(x + 4, y - 3, 1, 2)
+  ctx.fillRect(x - 4, y + 2, 1, 2)
+  ctx.fillRect(x + 4, y + 2, 1, 2)
   ctx.globalAlpha = 1
 }
 
@@ -1568,11 +1944,11 @@ export function renderGame(ctx: CanvasRenderingContext2D, engine: GameEngine, re
   drawRidge(ctx, cam, time, 0.08, 2001, 190, 36, '#101a2a')
   drawRidge(ctx, cam, time, 0.15, 2101, 199, 25, '#0c1622')
   drawPylons(ctx, cam)
-  drawTown(ctx, cam, time)
   drawHorizonHaze(ctx, time)
   drawRidge(ctx, cam, time, 0.22, 2201, 207, 13, '#0a131c')
   drawDistantTrees(ctx, cam, 0.44, '#0a141d', 27, 20, 52)
   drawDistantTrees(ctx, cam, 0.63, '#071018', 18, 14, 32)
+  drawHauntedVillage(ctx, cam, time, engine.seed)
 
   ctx.save()
   ctx.translate(-cam + shakeX, shakeY)
@@ -1621,6 +1997,7 @@ export function renderGame(ctx: CanvasRenderingContext2D, engine: GameEngine, re
   drawSurvivor(ctx, engine)
   drawBullets(ctx, engine)
   drawParticles(ctx, engine.particles)
+  if (engine.hitMarker) drawHitMarker(ctx, engine.hitMarker)
 
   for (const text of engine.texts) {
     const screenX = text.x - cam
