@@ -35,6 +35,7 @@ On touch devices, on-screen controls appear automatically (left/right/jump/crouc
 ## Features
 
 - **Procedural infinite world** — deterministic smooth-noise ground plus generated trees, poles, houses, fences, puddles and foreground props. Chunks stream in ahead and are deleted behind the camera.
+- **Wrecked cars** — broken cars sometimes spawn across the line. They are solid: walk into one and you stop; the dead stop too. Jump onto the roof to cross and to shoot down at the horde piling up below, where nothing can climb and no melee can reach you. (Full implementation walkthrough: `README.md` § 7.9.)
 - **Seeded districts** — each three-chunk region rolls a district (`rail`, `village`, `woods`, `yard`, `outskirts`, `graveyard`) from the run seed, with its own prop mix and occasional landmarks. The opening stretch is jittered per seed too, so no two runs look alike.
 - **Roadside dressing** — benches, trash cans, barrels, crates, gravestones, fences and lampposts line the track, and a haunted village with a chapel, lit windows, dead trees and drifting lanterns sits on the horizon.
 - **New map every run** — the seed is regenerated on launch and on every restart; no progress or terrain is persisted.
@@ -79,6 +80,8 @@ In development only, the live engine is exposed as `window.__deadline` for debug
 
 ## Balance notes
 
+- Wrecked cars roll in ~1 of 3 later chunks (and 62% of opening chunks), but only on flat ground and never within jumping distance of the spawn point.
+- A car roof is 30 px above the street; the jump apex is ~49 px, so climbing on is easy, but the drop on the other side is a commitment.
 - Waves peak at `min(18, 3 + wave * 2)` zombies; waves advance every 42 seconds.
 - The run opens with a short grace period before the first spawns reach you.
 - Spawn sides alternate strictly, and a zombie that ended up behind a running survivor sprints briefly (5.6× walk speed, capped) to close the gap instead of being left off-screen.

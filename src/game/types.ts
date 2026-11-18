@@ -165,6 +165,7 @@ export type PropKind =
   | 'barrel'
   | 'crate'
   | 'gravestone'
+  | 'car'
 
 export type PropDepth = 'back' | 'mid' | 'front'
 
@@ -182,6 +183,21 @@ export interface TerrainChunk {
   startX: number
   props: Prop[]
   district: District
+}
+
+/**
+ * A solid wrecked car on the line.
+ *
+ * `top` is the world y of the roof: the player can stand on it, but nobody
+ * below can climb up, so a roof is a safe firing position.
+ */
+export interface CarObstacle {
+  /** Center of the car in world space. */
+  x: number
+  /** Half the body width. */
+  halfW: number
+  /** World y of the roof (smaller y = higher). */
+  top: number
 }
 
 export interface Toast {

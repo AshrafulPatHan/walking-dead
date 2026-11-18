@@ -41,6 +41,7 @@
    - 7.6 [Chunk streaming](#76-chunk-streaming)
    - 7.7 [Determinism: what the seed controls](#77-determinism-what-the-seed-controls)
    - 7.8 [Rendering pipeline in order](#78-rendering-pipeline-in-order)
+   - 7.9 [Wrecked cars, line by line](#79-wrecked-cars-line-by-line)
 8. [Where to change what](#8-where-to-change-what)
 9. [Extension recipes](#9-extension-recipes)
 10. [Debugging and QA](#10-debugging-and-qa)
@@ -55,6 +56,7 @@
 - You are a survivor walking an endless night railway line.
 - The dead attack from **both sides**.
 - The map is procedurally generated and **never ends**.
+- Broken cars block the line; jump on the roof to turn one into a firing platform the dead cannot climb.
 - Nothing is saved. Every launch and every restart creates a new world seed.
 - There is no win condition. You survive, kill, explore and score until you die.
 
@@ -283,7 +285,15 @@ Each district has its own prop mix:
 
 Every third chunk in a region may roll a landmark (water tower or carriage + house + gravestone). The first two chunks are hand-composed but still seed-jittered, so no two runs open on an identical screen.
 
-Props are **purely visual**: they do not collide. Only the ground is solid.
+**Wrecked cars** are the one exception to decorative scenery. A seed roll can drop a broken car in the middle of the line:
+
+- roughly one chunk in three (`CAR_CHANCE = 0.34`), and a 62% chance in the opening chunk,
+- only where the ground is flat enough for the body to sit flush,
+- never close enough to the spawn point to trap the player at the start.
+
+The car is solid at ground level: you cannot walk through it, and neither can the dead. The only way past is to **jump onto the roof** (`CAR_H = 30` px tall, comfortably under the jump apex). Zombies cannot climb, cannot cross the wreck and cannot land melee hits on a survivor standing on the roof, which makes a car a perfect firing platform — a short toast explains this the first time you land on one.
+
+Everything else is **purely visual**: benches, fences, gravestones and the rest do not collide. Only the ground and the wrecked cars are solid. Section [7.9](#79-wrecked-cars-line-by-line) explains the implementation step by step.
 
 ---
 
@@ -482,9 +492,10 @@ This file has no runtime code. It is the shared vocabulary for the engine, rende
 | `ParticleShape` | `square \| spark \| smoke` |
 | `Particle` | Position, velocity, life, size, color, gravity, drag, shape |
 | `FloatText` | Rising combat text with life and color |
-| `PropKind` | All 15 scenery types |
+| `PropKind` | All 16 scenery types (`car` is the only solid one) |
 | `PropDepth` | `back \| mid \| front` |
 | `Prop` | Kind, depth, absolute x, seed, scale, variant |
+| `CarObstacle` | Solid wreck box: center x, body half-width and roof y. Built by the engine from `car` props |
 | `TerrainChunk` | Index, start x, props, district |
 | `Toast` | Centered HUD message with tone and lifetime |
 | `InputState` | Held directions, fire, logical aim point, mouse-active flag |
@@ -519,9 +530,17 @@ Everything gameplay-facing is centralized here.
 | `PLAYER_SPEED` | 104 px/s | Walk speed |
 | `PLAYER_CROUCH_SPEED` | 52 px/s | Crouch speed |
 | `PLAYER_JUMP` | -318 px/s | Jump impulse (negative = up) |
-| `PLAYER_W` | 12 | Player width used by attack reach |
+| `PLAYER_W` | 12 | Player width used by attack reach and car clearance |
 | `PIPE_RANGE` | 34 | Base melee reach |
 | `MAX_PARTICLES` | 260 | Hard particle cap |
+
+#### Wrecked cars
+
+| Constant | Value | Meaning |
+| --- | --- | --- |
+| `CAR_W` | 44 | Body width in px (before per-car scale jitter) |
+| `CAR_H` | 30 | Roof height above the ground |
+| `CAR_CHANCE` | 0.34 | Chance that a later chunk rolls a car |
 
 #### Economy
 
@@ -741,6 +760,23 @@ For every region start (`index % 3 === 0`), `hash01(seed ^ 0x6c078965, region)` 
 - `> 0.9` → water tower + lamp,
 - otherwise → carriage + house + gravestone.
 
+**Wrecked cars**
+
+After the district mix, every chunk rolls for one solid wreck:
+
+```ts
+const carMin = startX + (index === 0 ? 330 : 46)
+const carMax = startX + CHUNK_W - 80
+if (carMax > carMin && rand() < (index === 0 ? 0.62 : CAR_CHANCE)) { … }
+```
+
+- Chunk 0 keeps its car at least 130 px ahead of the player spawn (x = 200), so a run never opens with the player boxed in.
+- Later chunks can place one anywhere from 46 px to `CHUNK_W - 80` px into the chunk.
+- The x is picked first, then the ground height is sampled at both body edges; if they differ by more than **7 px**, the car is skipped. A wreck never floats over a slope.
+- Scale jitter is `0.94–1.12`; the collision box uses the same scale.
+
+The prop is stored with depth `mid` and the `car` kind. `render.ts` draws it, and `engine.rebuildCars()` turns it into a `CarObstacle` for the physics pass.
+
 **Sorting**
 
 All props are sorted by:
@@ -749,7 +785,7 @@ All props are sorted by:
 PROP_ORDER[kind] - PROP_ORDER[otherKind] || x
 ```
 
-The order is: carriage, waterTower, house, gravestone, deadTree, pine, bench, fence, trashCan, barrel, crate, sign, lamp, bush, rock.
+The order is: carriage, waterTower, car, house, gravestone, deadTree, pine, bench, fence, trashCan, barrel, crate, sign, lamp, bush, rock.
 
 The renderer separately draws `back`, `mid` and `front` passes, so this ordering mostly stabilizes drawing within each depth.
 
@@ -780,6 +816,7 @@ Core collections:
 - `particles`
 - `texts`
 - `chunks: Map<number, TerrainChunk>`
+- `cars: CarObstacle[]` — solid wrecks rebuilt from the loaded chunks
 
 Run state:
 
@@ -799,13 +836,14 @@ Private bookkeeping:
 - `lastHitSound` (throttles hit SFX to ~35 ms)
 - `aimAngle` (sticky mouse angle)
 - `nextSpawnSide` (strict alternation)
+- `sawCarHint` (one-time wreck-roof toast)
 
 #### Lifecycle methods
 
 | Method | Behaviour |
 | --- | --- |
 | `constructor()` | Calls `reset('menu', newSeed())` |
-| `reset(phase, seed)` | Rebuilds player, clears all arrays, sets camera, stats, timers, aim, chunks |
+| `reset(phase, seed)` | Rebuilds player, clears all arrays (including `cars`), sets camera, stats, timers, aim, chunks |
 | `eventsReset()` | Resets animation `time` and clears bullets |
 | `startRun()` | Unlocks audio, resets with a **new seed**, shows toast, equips pipe, plays UI sound |
 | `toMenu()` | Resets to menu with a new seed |
@@ -925,10 +963,20 @@ Vertical physics:
 - `x += vx * dt`
 - `vy += GRAVITY * dt`
 - `y += vy * dt`
-- Sample `groundHeightAt(seed, x)`.
-- If feet are at/below ground: snap, zero `vy`, grounded, landing dust if the fall was fast.
-- **Slope glue:** if the player was grounded, is moving downward, and the ground is less than 7 px below, snap down. This prevents micro-hopping down gentle slopes.
+- `supportHeight(x, prevFeet)` returns the higher of the terrain and any wreck roof under the player:
+  - the terrain from `groundHeightAt(seed, x)`,
+  - a car roof only when the player's x is inside the body **and** the feet started the frame at or above the roof (`prevFeet <= top + 0.5`). Landing from below therefore never teleports the player onto the car.
+- If feet are at/below the support height: snap, zero `vy`, grounded, landing dust if the fall was fast.
+  - Landing on a roof also plays `sound.thud()`, kicks up dust and, the first time in a run, shows the “they cannot climb” toast.
+- **Slope glue:** if the player was grounded, is moving downward, and the support is less than 7 px below, snap down. This prevents micro-hopping down gentle slopes.
 - Otherwise airborne.
+
+Horizontal collision with wrecks, after the vertical step:
+
+- `resolvePlayerCars(prevX)` ignores any car whose roof is at or above the player's feet — standing on it is allowed.
+- Below the roof, if the player's body edge overlaps the wreck, they are pushed back to the side they came from (`prevX`), so sliding into a car never pops them through it.
+
+The roof is 30 px above the street while the jump apex is about 49 px (`318² / (2 × 1020)`), so climbing up is deliberate but comfortable.
 
 Animation and combat:
 
@@ -936,7 +984,22 @@ Animation and combat:
 - Fire is attempted whenever `input.fire` is held and cooldown is 0.
 - While hurt and grounded, horizontal velocity is damped hard for a moment.
 
-There is **no x clamp**, so the player can walk forever in either direction.
+There is **no x clamp**, so the player can walk forever in either direction. The only horizontal collision is against wrecked cars.
+
+#### Car collision helpers
+
+| Method | Behaviour |
+| --- | --- |
+| `supportHeight(x, prevFeet)` | Returns `{ height, car }` for the highest valid surface: terrain, or a wreck roof when the feet came from above it |
+| `resolvePlayerCars(prevX)` | Pushes the player out of a wreck body horizontally; skipped when their feet are on/above the roof |
+| `playerOnCar()` | True when the player's x is over a wreck and `\|y - top\| ≤ 1.5` |
+| `resolveZombieCars(z, prevX)` | Same horizontal push for zombies; also zeroes their `vx` |
+| `pushZombiesOutOfCars()` | Runs after the crowd-separation pass so a shove cannot bury a zombie inside a wreck |
+| `rebuildCars()` | Rebuilds `this.cars` from every loaded chunk's `car` props using `CAR_W`/`CAR_H` and the prop scale |
+
+`rebuildCars()` is called from `ensureChunks()` / `refreshChunks()` whenever the chunk set changes, so the solid list always matches what is on screen. Because the collision box and the sprite are derived from the same constants, they cannot drift apart.
+
+Section [7.9](#79-wrecked-cars-line-by-line) walks through the whole feature end to end, including the exact update order and the sign pitfall that world-space y creates.
 
 #### `attack()`
 
@@ -1043,14 +1106,16 @@ For each zombie:
    - after a **0.32 s wind-up**, if not yet struck:
      - reach = 22 + 6 brute, or 17 + 6 other,
      - check vertical overlap,
+     - `reachable = !playerOnCar()` — the dead cannot hit a survivor on a wreck roof,
      - damage the player or kick up a miss particle,
    - after **0.85 s total**, return to chase and store a 0.45 s cooldown value (the attack-state duration is the actual pacing gate).
-7. Physics: apply gravity, move, sample ground, snap/airborne.
+7. Physics: apply gravity, move, `resolveZombieCars` (blocked by wrecks), sample ground, snap/airborne.
 8. Off-screen culling: more than 820 px outside the camera bounds → `hp = -999`.
 
 After the loop:
 
 - Run the separation pass (see 7.5).
+- `pushZombiesOutOfCars()` guarantees the crowd shove never leaves a zombie inside a wreck.
 - Remove zombies that are hard-culled or whose death animation has finished + 0.4 s.
 
 #### `damageZombie(z, amount, dir, hitX, hitY)`
@@ -1369,9 +1434,15 @@ Drawing functions:
 - `drawTrashCan` — cylinder, lid, ribs, variant tilt/dents.
 - `drawBarrel` — staves, bands, variant lid/tilt.
 - `drawCrate` — planked box with cross-brace and stencil marks.
+- `drawCar` — wrecked coupe/sedan built from the same `CAR_W` × `CAR_H` box the engine collides with:
+  - four loose paint variants,
+  - wheels (one torn off on some variants), lower body, cabin and roof highlight,
+  - two dark window openings with a starred windshield,
+  - door seam, handle, loose bumpers and a dead headlight/tail light.
+  - Drawn at `baseY` (not `baseY + 2`), because its feet are the collision line.
 - `drawGravestone` — rounded or slab marker, cross/chip details, grass at the base.
 
-Props never affect collision.
+Only the wrecked car is solid; every other prop is decorative and never affects collision.
 
 #### Characters
 
@@ -1692,6 +1763,7 @@ Both helpers short-circuit when muted or not ready.
 | `pistol()` | bandpass noise 1500→400 + square 180→60 | Pistol shot |
 | `mg()` | highpass noise 900→1600 + square 130→70 | MG shot |
 | `melee()` | bandpass noise 600→1800 | Pipe swing |
+| `thud()` | lowpass noise 420→110 + sine 92→44 | Landing on a wreck roof |
 | `hit()` | lowpass noise 800→300 + sine 110→60 | Bullet/melee impact |
 | `kill()` | lowpass noise 620→160 + saw 90→40 | Zombie death |
 | `hurt()` | saw 170→70 + lowpass noise | Player damage |
@@ -1907,6 +1979,7 @@ Bullet collision:
 
 - Liang–Barsky segment vs AABB using previous and current positions.
 - This avoids tunneling even at 600 px/s with a 1/60 s step (~10 px per step).
+- Only zombies are tested; bullets pass through scenery and wrecks, so a roof shot can hit a zombie standing on the far side of the car.
 
 ### 7.3 Player physics
 
@@ -1925,7 +1998,11 @@ Jump feel:
 - Variable height: releasing early clamps upward velocity.
 - Slope glue: snaps down up to 7 px when grounded, preventing stutter on downhill terrain.
 
-There is no horizontal collision and no x boundary. The only solid surface is the ground curve.
+Surfaces:
+
+- The ground curve plus the roofs of wrecked cars.
+- Roof support only applies when the feet start the frame above it, so you have to jump up; you cannot clip through the side.
+- Away from cars there is no horizontal collision and no x boundary; the player can walk forever in either direction.
 
 ### 7.4 Zombie state machine
 
@@ -1957,6 +2034,8 @@ There is no horizontal collision and no x boundary. The only solid surface is th
 
 Attack reach is slightly longer for brutes. Vertical overlap must be within roughly the body height, so a zombie on a steep slope above/below you may miss.
 
+Wrecked cars break the pursuit: a zombie walking into one is pushed back out of the body, keeps pressing against the side, and can never climb. Even if its reach overlaps the player standing on the roof, the `reachable` gate in the attack state stops the strike, so the horde piles up helplessly at street level.
+
 ### 7.5 Separation / crowd behaviour
 
 After movement, every pair of live zombies is checked:
@@ -1980,6 +2059,8 @@ Why:
 - Treating an attacking zombie as solid prevents the rear from pushing it through the player.
 
 This is an O(n²) pass, but `n` is capped at 18, so it is cheap.
+
+After the pass, `pushZombiesOutOfCars()` re-checks every zombie against the wreck list. A crowd can shove a queue forward hard enough to put the front zombie inside a car body, so the final clamp guarantees the pile stays outside and the player on the roof stays unreachable.
 
 ### 7.6 Chunk streaming
 
@@ -2095,6 +2176,399 @@ z-40 scanlines, inset shadow, corner brackets
 
 ---
 
+### 7.9 Wrecked cars, line by line
+
+This is the one prop in the game that is not scenery. The whole feature in one sentence:
+
+> A seeded `Prop` becomes a `CarObstacle` box; the box's top is ground the player can only land on from above, its sides are a wall for everyone, and zombies never ask for the top at all.
+
+Five small pieces cooperate:
+
+| Layer | File | Job |
+| --- | --- | --- |
+| Tuning | `constants.ts` | `CAR_W`, `CAR_H`, `CAR_CHANCE` |
+| Data | `types.ts` | `'car'` in `PropKind`, plus `CarObstacle` |
+| Placement | `world.generateChunk` | Seeded x, scale, variant, flat-ground check |
+| Simulation | `engine.ts` | Build the solid list, support the player on the roof, block player and zombies |
+| Presentation | `render.drawCar` | Draw the box the engine collides with |
+
+Data flows one way:
+
+```
+seed + chunk index
+        │
+        ▼
+generateChunk() ──▶ Prop { kind: 'car', x, seed, scale, variant, depth: 'mid' }
+        │
+        ▼
+rebuildCars()   ──▶ CarObstacle { x, halfW, top }
+        │
+        ├──▶ updatePlayer()  ──▶ supportHeight() + resolvePlayerCars()
+        ├──▶ updateZombies() ──▶ resolveZombieCars() + playerOnCar()
+        └──▶ renderGame()    ──▶ drawCar()
+```
+
+The important idea: **the prop is only data**. Chunks can be deleted at any time, so physics never reads props directly. It reads `engine.cars`, a flat list rebuilt whenever the chunk set changes.
+
+#### Coordinates: y grows downward
+
+Every number below is easier to follow if you remember the screen convention:
+
+```
+y = 148.0   top of the survivor's head while standing on a roof
+y = 178.8   car roof (car.top)                   ← smaller y = higher up
+y = 211.8   street (groundHeightAt)
+```
+
+So a roof that is *above* the ground has a **smaller** y than the ground. This one fact explains the `top < height` comparison in `supportHeight()` and the `prevFeet <= top` guard. Getting the inequality backwards was the original bug: the roof became unreachable and the player fell through the car.
+
+#### The constants
+
+```ts
+// constants.ts
+export const CAR_W = 44          // body width in px, before per-car scale
+export const CAR_H = 30          // roof height above the ground
+export const CAR_CHANCE = 0.34   // roll for a car in a later chunk
+```
+
+- `CAR_W` is the **full** width. `CarObstacle.halfW = (CAR_W * scale) / 2`.
+- `CAR_H` is subtracted from the ground: `top = ground - CAR_H * scale`.
+- Both the engine and the renderer read these constants, so there is no second set of magic numbers to keep in sync.
+- The jump apex is `|PLAYER_JUMP|² / (2 * GRAVITY) = 318² / 2040 ≈ 49.6` px, comfortably above the 30 px roof. That is the balance relationship to preserve if you touch either value.
+
+#### The data model
+
+```ts
+// types.ts
+export type PropKind = … | 'car'
+
+export interface CarObstacle {
+  x: number       // center of the car
+  halfW: number   // half the body width
+  top: number     // world y of the roof (smaller y = higher)
+}
+```
+
+`Prop` stays the world/rendering record (kind, depth, x, seed, scale, variant). `CarObstacle` is the physics record: only the three numbers collision needs. Keeping them separate means a wreck can be a `mid`-depth sprite and still have a crisp, tiny collision shape.
+
+#### Placement: `generateChunk`
+
+After the district scenery, every chunk gets one car roll:
+
+```ts
+const carMin = startX + (index === 0 ? 330 : 46)
+const carMax = startX + CHUNK_W - 80
+if (carMax > carMin && rand() < (index === 0 ? 0.62 : CAR_CHANCE)) {
+  const cx = carMin + rand() * (carMax - carMin)
+  const scale = 0.94 + rand() * 0.18
+  const halfW = (CAR_W * scale) / 2
+  const left = groundHeightAt(seed, cx - halfW)
+  const right = groundHeightAt(seed, cx + halfW)
+  if (Math.abs(left - right) <= 7) {
+    add('car', cx, 'mid', Math.floor(rand() * 3), scale)
+  }
+}
+```
+
+Read it in order:
+
+1. **Range.** Later chunks place cars between 46 px and 400 px into the chunk. Chunk 0 starts at 330 so the wreck is at least ~105 px ahead of the player spawn at x = 200 — close enough to meet immediately, far enough that the opening screen is never a trap.
+2. **Chance.** Opening chunk: 62%, so most first screens show the mechanic. Later chunks: 34%.
+3. **Scale jitter.** 0.94–1.12 keeps wrecks from looking stamped from one sprite.
+4. **Flat-ground check.** The ground is sampled under both body edges. If it changes by more than 7 px across the car, the car is skipped for this chunk. That is why a wreck never floats over a slope and why the roof always clears the terrain (30 px of height versus at most 7 px of rise).
+5. **Prop.** Depth `mid` so it sorts with scenery; the engine ignores depth entirely.
+
+There is a determinism detail worth knowing: the rolls are consumed in a fixed order — chance, x, scale, variant, then `add()`'s internal prop seed. Change that order and every later prop in the same chunk changes too.
+
+#### Building the solid list: `rebuildCars`
+
+```ts
+private rebuildCars(): void {
+  this.cars = []
+  for (const chunk of this.chunks.values()) {
+    for (const prop of chunk.props) {
+      if (prop.kind !== 'car') continue
+      const base = groundHeightAt(this.seed, prop.x)
+      this.cars.push({
+        x: prop.x,
+        halfW: (CAR_W * prop.scale) / 2,
+        top: base - CAR_H * prop.scale,
+      })
+    }
+  }
+}
+```
+
+- Called from `ensureChunks()` and `refreshChunks()` whenever a chunk is added or removed, so `cars` always mirrors the loaded chunks.
+- `top` is derived, never stored in the chunk. That keeps the seed the single source of truth.
+- Rects are unrounded here; the renderer rounds to whole pixels. The half-pixel difference is invisible and never breaks collision.
+- `this.cars` is public mostly for debugging: `__deadline.cars` shows exactly what the physics sees.
+
+#### Player vertical support: `supportHeight`
+
+This function answers one question: *given that the player is at x and started the frame at `prevFeet`, what is the highest surface they may land on?*
+
+```ts
+private supportHeight(x: number, prevFeet: number) {
+  let height = groundHeightAt(this.seed, x)
+  let car: CarObstacle | null = null
+  for (const wreck of this.cars) {
+    if (x <= wreck.x - wreck.halfW || x >= wreck.x + wreck.halfW) continue
+    if (prevFeet > wreck.top + 0.5) continue
+    if (wreck.top < height) {
+      height = wreck.top
+      car = wreck
+    }
+  }
+  return { height, car }
+}
+```
+
+Three checks, each with a purpose:
+
+1. **Horizontal test uses the player's centre.** If the feet are horizontally over the body, the roof is a candidate. The player's 12 px width is deliberately not included: the edge zone is handled by the horizontal resolver, which makes walking off feel natural rather than snagging on a 6 px lip.
+2. **The one-way guard.** `prevFeet > wreck.top + 0.5` means "the feet started this frame *below* the roof" (y is down). Such a player must not be lifted onto the roof. This is what makes the roof reachable **only by jumping**. Without it, simply walking into the car at street level would satisfy `p.y >= top` and teleport the player up. The `0.5` is a tolerance for float noise.
+3. **Highest surface wins.** `wreck.top < height` compares against the terrain: a smaller y is higher. If the roof is above the street, it becomes the support and is returned as `car` (the caller needs to know it was a car for the landing effects).
+
+`updatePlayer` calls it *after* integrating velocity, using `prevY` captured *before* the integration:
+
+```ts
+const wasGrounded = p.onGround
+const prevX = p.x
+const prevY = p.y
+p.x += p.vx * dt
+p.vy += GRAVITY * dt
+p.y += p.vy * dt
+
+const support = this.supportHeight(p.x, prevY)
+if (p.y >= support.height) {          // crossed the surface this frame
+  p.y = support.height
+  p.vy = 0
+  p.onGround = true
+} else if (wasGrounded && p.vy >= 0 && support.height - p.y < 7) {
+  // slope glue, unchanged from the terrain code
+} else {
+  p.onGround = false
+}
+```
+
+Because the check is "was the player above the surface *before* this frame", a fall from any height catches the roof without tunnelling, even at low frame rates.
+
+#### Player horizontal blocking: `resolvePlayerCars`
+
+Vertical support decides the y. Horizontal blocking decides the x. They run in that order, every frame:
+
+```ts
+// …vertical step above…
+this.resolvePlayerCars(prevX)
+```
+
+```ts
+private resolvePlayerCars(prevX: number): void {
+  const p = this.player
+  const half = p.w * 0.5
+  for (const wreck of this.cars) {
+    if (p.y <= wreck.top + 0.5) continue                 // feet at/above roof
+    if (p.x + half <= wreck.x - wreck.halfW ||
+        p.x - half >= wreck.x + wreck.halfW) continue    // no body overlap
+    p.x =
+      prevX <= wreck.x - wreck.halfW
+        ? wreck.x - wreck.halfW - half                   // push back left
+        : wreck.x + wreck.halfW + half                   // push back right
+  }
+}
+```
+
+- **Skip if on top.** `p.y <= top + 0.5` means the feet cleared the roof; a player standing on the car must not be pushed sideways.
+- **Body vs body.** The player is a 12 px-wide box centred on `x`; the car is `2 * halfW` wide. Only overlap triggers a push.
+- **Side from `prevX`.** The side is chosen from the *previous* centre, not the current one. If the player is moving fast or dt spikes, this restores the side they actually came from instead of guessing and potentially popping them through to the far side.
+- **Vertical first matters.** If horizontal ran first, a player descending onto the roof would be pushed out before `supportHeight` could catch them. Doing vertical first sets `p.y = top`, so the horizontal pass then skips them. This exact ordering is what makes "jump onto the roof" reliable.
+
+#### Landing feedback
+
+The vertical step also handles the feel of the landing:
+
+```ts
+if (support.car && !wasGrounded) {
+  // dust puff
+  sound.thud()
+}
+…
+if (support.car && !this.sawCarHint) {
+  this.sawCarHint = true
+  this.setToast('WRECKED CAR · THEY CANNOT CLIMB UP HERE', 'good')
+}
+```
+
+- `wasGrounded` is `onGround` from *before* physics, so this only fires on a real touchdown, not on every frame of standing.
+- `sawCarHint` is a per-run flag reset in `reset()`, so the tutorial toast appears once, not on every wreck.
+- The sound is `SoundKit.thud()`: a low-pass noise sweep plus a falling sine. No asset.
+
+#### Zombies: blocked, never supported
+
+Zombies deliberately do **not** call `supportHeight`. There is no jump, no climb, no roof query — only the side resolver:
+
+```ts
+private resolveZombieCars(z: Zombie, prevX: number): void {
+  const half = z.w * 0.5
+  for (const wreck of this.cars) {
+    if (z.y <= wreck.top + 0.5) continue
+    if (z.x + half <= wreck.x - wreck.halfW ||
+        z.x - half >= wreck.x + wreck.halfW) continue
+    z.x =
+      prevX <= wreck.x - wreck.halfW
+        ? wreck.x - wreck.halfW - half
+        : wreck.x + wreck.halfW + half
+    z.vx = 0
+  }
+}
+```
+
+It is the player resolver with two differences:
+
+- it uses the zombie's width (`z.w`), which varies by type,
+- it zeroes `vx` so the AI does not keep accelerating into the wall and jitter against it. They lean on the car instead.
+
+The crowd pass can still shove the front zombie forward, so after separation the engine runs one more clamp:
+
+```ts
+private pushZombiesOutOfCars(): void {
+  for (const z of this.zombies) {
+    if (z.state === 'die') continue
+    const half = z.w * 0.5
+    for (const wreck of this.cars) {
+      if (z.y <= wreck.top + 0.5) continue
+      if (z.x + half <= wreck.x - wreck.halfW ||
+          z.x - half >= wreck.x + wreck.halfW) continue
+      z.x = z.x < wreck.x
+        ? wreck.x - wreck.halfW - half
+        : wreck.x + wreck.halfW + half
+    }
+  }
+}
+```
+
+This pass does not care about `prevX`: it just guarantees nobody ends the frame inside a body. That invariant is what keeps the pile *outside* the car.
+
+The final piece is the melee gate. `playerOnCar()` is a cheap geometric query:
+
+```ts
+private playerOnCar(): boolean {
+  const p = this.player
+  for (const wreck of this.cars) {
+    if (p.x <= wreck.x - wreck.halfW || p.x >= wreck.x + wreck.halfW) continue
+    if (Math.abs(p.y - wreck.top) <= 1.5) return true
+  }
+  return false
+}
+```
+
+and the attack state consults it once per strike:
+
+```ts
+const reachable = !this.playerOnCar()
+if (Math.abs(p.x - z.x) < reach && verticalOk && reachable) {
+  this.damagePlayer(z.damage, z.x)
+}
+```
+
+The 1.5 px tolerance absorbs the tiny float drift around `top`. This is the second safety net: even if a brute's 22 px reach overlaps the roof near an edge, the strike is refused. The wind-up animation still plays and the miss particles still spawn, so the horde visibly swipes at the car.
+
+#### Rendering: `drawCar`
+
+`drawCar` takes the exact same constants:
+
+```ts
+const w = Math.round(CAR_W * scale)
+const h = Math.round(CAR_H * scale)
+const half = Math.round(w / 2)
+```
+
+and draws wheels, lower body, cabin, windows, bumpers, lights and hash-seeded rust blooms inside that `w × h` box. Two deliberate choices:
+
+- **Drawn at `baseY`, not `baseY + 2`.** Most props are nudged 2 px into the ground so they look planted. The car's base *is* its collision line, so it sits exactly on `groundHeightAt`.
+- **Depth `mid`.** It is drawn with the mid scenery, before the ground and before every character. That produces the right layering for free: the survivor and zombies are drawn after the car, so they stand in front of it at street level, and the survivor appears on top when standing on the roof. A `front` depth would paint the car over the player; a `back` depth would let lamps and fences paint over the car.
+
+Because the sprite and the box both come from `CAR_W`/`CAR_H`/`scale`, resizing the car is a one-line change that updates art and physics together.
+
+#### Bullets pass through
+
+`updateBullets` only tests zombies. Cars are **not** bullet blockers. That is intentional:
+
+- the player can shoot down at zombies on the far side of the wreck,
+- the roof works as cover from melee, not as cover from gunfire,
+- it avoids the awkward case of a roof shot colliding with the car the player is standing on.
+
+#### Worked example: a real jump
+
+Using seed 6 from the regression test:
+
+```
+car.x    = 381.05
+car.halfW = 23.99      → left edge 357.06, right edge 405.04
+car.top  = 178.78
+street   ≈ 211.8
+player half-width = 6
+```
+
+Walking in from the left, the player stops at:
+
+```
+381.05 - 23.99 - 6 = 351.06
+```
+
+which is exactly what both the headless test and the live build reported. Jumping from 10 px outside the left edge, holding jump for 200 ms and then holding right, produced these samples (about 80 ms apart):
+
+| sample | player x | player y | state |
+| --- | --- | --- | --- |
+| 1 | 350.1 | 165.4 | rising, above the roof |
+| 2 | 357.7 | 167.5 | over the front bumper |
+| 3 | 366.4 | 176.8 | descending toward the roof |
+| 4 | 373.3 | 178.8 | **landed on the roof** |
+| 5–7 | 382–399.3 | 178.8 | walking on the roof |
+| 8 | 411.0 | 179.6 | past the right edge, now falling |
+| 11 | 437.0 | 210.2 | back on the street |
+
+The jump clears the roof because the apex is ~49.6 px. Solving the jump equation puts the descending feet back at `top` about 0.49 s after take-off, by which time the horizontal input has carried the player over the body. The roof only becomes a support while the feet are above it, so the descent lands cleanly instead of being pushed aside.
+
+#### Edge cases and invariants
+
+- **No starting trap.** Chunk 0's car can never be within ~100 px of the spawn.
+- **No floating wrecks.** Placement requires ≤ 7 px height difference across the body, and the roof is 30 px up, so terrain never pokes through it.
+- **No tunnelling.** Support is resolved from the previous frame's feet, not a post-move guess.
+- **One-way roof.** Only a player whose feet were above the roof can land on it. You cannot climb the side and cannot be "sucked up" while walking.
+- **Standing is stable.** `resolvePlayerCars` skips anyone at/above roof height, so the top is never treated as a wall.
+- **Teleports are safe.** Drop the player inside a car from the console and the next frame's horizontal pass pushes them out.
+- **Streaming is safe.** Deleting the chunk deletes the `CarObstacle` on the next rebuild; nothing references the old world region.
+- **No soft locks.** There is no x boundary and the roof is always jumpable, so a car can never permanently trap the player: they either climb it or walk back the way they came.
+- **No skipping the climb.** Because the body blocks at street level, the roof is the only way past a wreck. That is the whole point of the prop.
+
+#### Tuning and debugging
+
+| Goal | Change |
+| --- | --- |
+| More / fewer wrecks | `CAR_CHANCE`; the opening-chunk 0.62 is in `world.generateChunk` |
+| Wider / narrower car | `CAR_W` (collision and sprite together) |
+| Easier / harder to climb | `CAR_H` (lower = easier). Keep it below the ~49.6 px jump apex |
+| Different placement window | `carMin` / `carMax` in `generateChunk` |
+| Different flatness tolerance | the `7` in `Math.abs(left - right) <= 7` |
+| Roof feel | the `0.5`, `1.5` and `7` tolerances in `supportHeight`, `resolvePlayerCars` and the slope glue |
+
+Live debugging (dev server only):
+
+```js
+const e = window.__deadline
+e.reset('playing', 6)        // seed 6 has a chunk-0 car
+e.cars                       // [{ x, halfW, top }] the physics list
+e.player.x = e.cars[0].x - e.cars[0].halfW - 10
+e.player.y = 211             // street level
+e.input.right = true         // walk into it and watch x stop
+```
+
+To test the roof directly, set `e.player.y = e.cars[0].top` and `e.player.onGround = true`, then spawn a few zombies and check `e.player.hp` — it must not move while `playerOnCar()` is true.
+
+---
+
 ## 8. Where to change what
 
 | I want to change… | Edit… | Notes |
@@ -2117,6 +2591,7 @@ z-40 scanlines, inset shadow, corner brackets
 | Terrain shape | `world.groundHeightAt` | Macro sine + coarse/fine noise amplitudes |
 | District mix | `DISTRICTS`, `districtAt` | Three-chunk regions |
 | Prop layout | `world.generateChunk` | Opening composition is explicit |
+| Wrecked car frequency / size | `CAR_CHANCE`, `CAR_W`, `CAR_H` and the car block in `generateChunk` | Collision and sprite both read these constants |
 | Prop art | `render.draw*` functions | All procedural |
 | Sky / parallax / village | `render.drawSky`, `drawRidge`, `drawHauntedVillage`, `drawPylons` | Parallax factors are call-site arguments |
 | Palette | `constants.PALETTE` and `tailwind.config.js` | Canvas and DOM use separate palettes; keep them in sync |
@@ -2161,7 +2636,7 @@ Everything else (spawning, damage, loot, scoring, health pips) works from stats 
 5. Add a case to `render.drawProp`.
 6. Choose `back`, `mid` or `front` depth.
 
-Props are non-colliding, so no physics changes are needed.
+Props are non-colliding, so no physics changes are needed — unless the new prop should be solid. For that, follow the `car` path: add a `CarObstacle`-style entry, rebuild it from the chunk props (see `engine.rebuildCars`), and resolve player/zombie overlap in `updatePlayer` and `updateZombies`.
 
 ### Add a district
 
@@ -2225,7 +2700,7 @@ The hook is stripped from production builds by `import.meta.env.DEV`.
 - **Distance is in metres, not pixels.** `HudState.distance = maxProgress / 8`.
 - **The displayed seed is only the last six hex digits.** The engine still holds the full 32-bit seed.
 - **Terrain is deterministic per seed; combat is not.** Two runs with the same seed share terrain but not zombie rolls.
-- **Props do not collide.** Walking through a bench is expected.
+- **Props do not collide**, with one exception: wrecked cars are solid.
 - **`engine.elapsed` is survival time; `engine.time` is animation time.** Pausing freezes both.
 - **Restarting always creates a new seed.** There is no “same map again” button.
 
@@ -2251,6 +2726,7 @@ The build script already runs `tsc` first. The production output is `dist/`.
 - Kill zombies: materials drop, combo rises, multiplier appears at 3 kills.
 - Weld at 40 materials: +25 HP, cooldown, toast.
 - Survive 42 s: wave toast and burst spawn.
+- Walk into a wrecked car: you stop at the body; jump onto the roof, then shoot the zombies crowding below.
 - Run in one direction for a minute: zombies still arrive from behind.
 - Pause/resume; blur the window; verify auto-pause.
 - Die: corpse, death screen, stats, restart gives a new map.
@@ -2273,7 +2749,13 @@ Chunk props are generated per index, but the ground is sampled continuously from
 
 ### Why are props non-colliding?
 
-The game is about movement and combat on a railway line. Making benches, fences and gravestones solid would require collision resolution, stuck handling and more complex AI pathing. They are scenery, and the player passes behind/in front of them by depth pass.
+The game is about movement and combat on a railway line. Making every bench, fence and gravestone solid would require collision resolution, stuck handling and more complex AI pathing. They are scenery, and the player passes behind/in front of them by depth pass.
+
+The wrecked cars are the deliberate exception: they are large enough to read as cover, they change how a fight plays out, and they are the only props with a real collision volume. Everything about them is derived from `CAR_W`/`CAR_H`, so the sprite and the solid box stay in sync.
+
+### Why can't zombies climb the car?
+
+Because a car is a wall with a roof, and the game only ever grants roof support when the feet came from above. Zombies have no jump at all; their side collision simply pushes them back out of the body. That makes a roof a safe firing platform by design: the player must jump up, and the dead can only crowd underneath. The `reachable` check in the attack state also prevents a lucky arm swing from hitting someone standing on top.
 
 ### Why does the game auto-aim on keyboard/touch?
 
@@ -2318,13 +2800,15 @@ One is drawn inside the world transform among the scene objects, and one after t
 
 ### Where is the collision code?
 
-- Player vs ground: `updatePlayer` (`groundHeightAt` + snap/glue).
+- Player vs ground and wreck roofs: `supportHeight` inside `updatePlayer` (`groundHeightAt` + snap/glue).
+- Player vs wreck body: `resolvePlayerCars` inside `updatePlayer`.
 - Zombie vs ground: `updateZombies` (same pattern).
+- Zombie vs wreck body: `resolveZombieCars` + `pushZombiesOutOfCars` in `updateZombies`.
 - Bullet vs zombie: `segmentHitsRect` in `updateBullets`.
-- Player vs zombie attack: distance + vertical overlap checks in `updateZombies`.
+- Player vs zombie attack: distance + vertical overlap checks in `updateZombies` (skipped when the player is on a roof).
 - Pickup vs player: distance check + magnet in `updatePickups`.
 
-There is no tile collision, no wall collision and no prop collision.
+There is no tile collision and no wall collision. The only solid objects are the ground curve and the wrecked cars.
 
 ### Where is the HUD data produced?
 

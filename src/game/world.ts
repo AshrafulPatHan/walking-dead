@@ -1,4 +1,4 @@
-import { CHUNK_W, GROUND_BASE } from './constants'
+import { CAR_CHANCE, CAR_H, CAR_W, CHUNK_W, GROUND_BASE } from './constants'
 import { hash01, hashInt, hashRange, mulberry32 } from './rng'
 import type { District, Prop, TerrainChunk } from './types'
 
@@ -62,19 +62,20 @@ export function districtAt(seed: number, chunkIndex: number): District {
 const PROP_ORDER: Record<Prop['kind'], number> = {
   carriage: 0,
   waterTower: 1,
-  house: 2,
-  gravestone: 3,
-  deadTree: 4,
-  pine: 5,
-  bench: 6,
-  fence: 7,
-  trashCan: 8,
-  barrel: 9,
-  crate: 10,
-  sign: 11,
-  lamp: 12,
-  bush: 13,
-  rock: 14,
+  car: 2,
+  house: 3,
+  gravestone: 4,
+  deadTree: 5,
+  pine: 6,
+  bench: 7,
+  fence: 8,
+  trashCan: 9,
+  barrel: 10,
+  crate: 11,
+  sign: 12,
+  lamp: 13,
+  bush: 14,
+  rock: 15,
 }
 
 /** Deterministically builds one 480px slice of scenery. */
@@ -230,6 +231,22 @@ export function generateChunk(seed: number, index: number): TerrainChunk {
         add('house', startX + 300 + rand() * 100, 'back', 3, 0.86)
         add('gravestone', startX + 40 + rand() * 100, 'mid', 0, 1)
       }
+    }
+  }
+
+  // Wrecked cars are solid obstacles dropped on the line. They are placed by
+  // seed, never on top of the survivor's start, and only where the ground is
+  // flat enough for the body to sit flush.
+  const carMin = startX + (index === 0 ? 330 : 46)
+  const carMax = startX + CHUNK_W - 80
+  if (carMax > carMin && rand() < (index === 0 ? 0.62 : CAR_CHANCE)) {
+    const cx = carMin + rand() * (carMax - carMin)
+    const scale = 0.94 + rand() * 0.18
+    const halfW = (CAR_W * scale) / 2
+    const left = groundHeightAt(seed, cx - halfW)
+    const right = groundHeightAt(seed, cx + halfW)
+    if (Math.abs(left - right) <= 7) {
+      add('car', cx, 'mid', Math.floor(rand() * 3), scale)
     }
   }
 

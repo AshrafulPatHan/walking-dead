@@ -1,4 +1,6 @@
 import {
+  CAR_H,
+  CAR_W,
   PALETTE,
   VIEW_H,
   VIEW_W,
@@ -1284,6 +1286,98 @@ function drawGravestone(ctx: CanvasRenderingContext2D, x: number, baseY: number,
   ctx.fillRect(left, baseY - 1, 1, 2)
 }
 
+/**
+ * A wrecked car sitting on the line. Solid: the survivor can jump onto the
+ * roof, but nothing on foot can climb up to it.
+ *
+ * The body is `CAR_W` wide and `CAR_H` tall so the silhouette matches the
+ * collision box the engine builds from the same constants.
+ */
+function drawCar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  baseY: number,
+  scale: number,
+  seed: number,
+  variant: number,
+): void {
+  const w = Math.round(CAR_W * scale)
+  const h = Math.round(CAR_H * scale)
+  const px = Math.round(x)
+  const gy = Math.round(baseY)
+  const half = Math.round(w / 2)
+
+  const paint = variant % 4
+  const body = ['#5c3a33', '#3d4b57', '#4d4a38', '#4f3f47'][paint]
+  const bodyDark = '#2a2729'
+  const roofTone = '#6f625b'
+  const steel = '#6f8296'
+  const rust = '#7a4a35'
+
+  const rect = (dx: number, dy: number, rw: number, rh: number, color: string) => {
+    ctx.fillStyle = color
+    ctx.fillRect(px + dx, gy + dy, rw, rh)
+  }
+
+  drawShadow(ctx, x, gy + 1, w, 0.32)
+
+  // Wheels: the rear always survives, the front one is torn off on some wrecks.
+  rect(-half + 5, -7, 8, 7, '#101418')
+  rect(-half + 7, -5, 4, 3, '#39404a')
+  if (paint === 1) {
+    rect(half - 13, -4, 8, 4, '#101418')
+    rect(half - 10, -5, 4, 3, '#39404a')
+  } else {
+    rect(half - 13, -7, 8, 7, '#101418')
+    rect(half - 11, -5, 4, 3, '#39404a')
+  }
+
+  // Lower body.
+  rect(-half, -19, w, 12, body)
+  rect(-half, -19, w, 2, bodyDark)
+  rect(-half, -9, w, 2, bodyDark)
+  ctx.fillStyle = 'rgba(232, 223, 198, 0.07)'
+  ctx.fillRect(px - half + 1, gy - 17, w - 2, 1)
+
+  // Cabin.
+  const cabX = -half + 10
+  const cabW = w - 22
+  rect(cabX, -h + 2, cabW, h - 21, body)
+  rect(cabX, -h, cabW, 2, roofTone)
+  rect(cabX, -h + 2, cabW, 1, bodyDark)
+
+  // Windows: the rear one is smashed out, the windshield is starred.
+  rect(cabX + 2, -h + 5, 8, 6, '#0a1016')
+  rect(cabX + 3, -h + 6, 2, 2, '#141c22')
+  rect(cabX + cabW - 10, -h + 5, 8, 6, '#0c1219')
+  ctx.fillStyle = '#3f4a52'
+  ctx.fillRect(px + cabX + cabW - 8, gy - h + 6, 1, 3)
+  ctx.fillRect(px + cabX + cabW - 6, gy - h + 7, 2, 1)
+  rect(cabX + cabW - 12, -h + 4, 2, 8, body)
+
+  // Door seam + handle.
+  rect(-half + 16, -17, 1, 8, bodyDark)
+  rect(-half + 18, -15, 3, 1, roofTone)
+
+  // Bumpers: the front one hangs loose.
+  rect(half - 6, -9, 6, 2, steel)
+  rect(-half, -9, 5, 2, '#4c5764')
+  rect(half - 3, -8, 2, 3, '#4c5764')
+
+  // Dead headlight and a dark tail light.
+  rect(half - 5, -18, 4, 3, '#161d24')
+  if (paint !== 2) rect(half - 5, -18, 2, 2, '#6b5a37')
+  rect(-half + 1, -18, 2, 2, '#5a2119')
+
+  // Rust blooms, seeded so every wreck is different.
+  for (let i = 0; i < 4; i += 1) {
+    if (hash01(seed * 31 + 1, i) < 0.45) continue
+    const rx = -half + 3 + Math.round(hashRange(seed * 31 + 2, i, 0, Math.max(1, w - 9)))
+    const ry = -18 + Math.round(hashRange(seed * 31 + 3, i, 0, 8))
+    rect(rx, ry, 2 + Math.round(hashRange(seed * 31 + 4, i, 0, 3)), 1, rust)
+  }
+}
+
 function drawProp(ctx: CanvasRenderingContext2D, prop: Prop, seed: number, time: number): void {
   const baseY = groundHeightAt(seed, prop.x)
   const scale =
@@ -1346,6 +1440,9 @@ function drawProp(ctx: CanvasRenderingContext2D, prop: Prop, seed: number, time:
       break
     case 'gravestone':
       drawGravestone(ctx, prop.x, baseY + 2, scale, prop.seed, prop.variant)
+      break
+    case 'car':
+      drawCar(ctx, prop.x, baseY, scale, prop.seed, prop.variant)
       break
     default:
       break

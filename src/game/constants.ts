@@ -15,6 +15,11 @@ export const PLAYER_W = 12
 export const PIPE_RANGE = 34
 export const MAX_PARTICLES = 260
 
+/** Wrecked car obstacle: body width, roof height above the ground, spawn chance per chunk. */
+export const CAR_W = 44
+export const CAR_H = 30
+export const CAR_CHANCE = 0.34
+
 export const WELD_COST = 40
 export const WELD_AMOUNT = 25
 

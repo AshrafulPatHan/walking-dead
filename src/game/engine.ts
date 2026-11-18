@@ -1,4 +1,6 @@
 import {
+  CAR_H,
+  CAR_W,
   CHUNK_W,
   GRAVITY,
   MAX_PARTICLES,
@@ -23,6 +25,7 @@ import { clamp, newSeed, randRange } from './rng'
 import { generateChunk, groundHeightAt } from './world'
 import type {
   Bullet,
+  CarObstacle,
   FloatText,
   GamePhase,
   HudState,
@@ -130,6 +133,8 @@ export class GameEngine {
   particles: Particle[] = []
   texts: FloatText[] = []
   chunks = new Map<number, TerrainChunk>()
+  /** Solid wrecked cars rebuilt from the loaded chunks. */
+  cars: CarObstacle[] = []
 
   input: InputState = {
     left: false,
@@ -172,6 +177,7 @@ export class GameEngine {
   private lastHitSound = 0
   private aimAngle = 0
   private nextSpawnSide: 1 | -1 = 1
+  private sawCarHint = false
 
   constructor() {
     this.reset('menu', newSeed())
@@ -188,6 +194,7 @@ export class GameEngine {
     this.particles = []
     this.texts = []
     this.chunks.clear()
+    this.cars = []
     this.eventsReset()
     this.cameraX = PLAYER_START_X - 190
     this.elapsed = 0
@@ -210,6 +217,7 @@ export class GameEngine {
     this.aimTargetId = null
     this.hitMarker = null
     this.nextSpawnSide = 1
+    this.sawCarHint = false
     this.ensureChunks()
   }
 
@@ -557,12 +565,15 @@ export class GameEngine {
     if (!this.input.jump && p.vy < -110) p.vy = -110
 
     const wasGrounded = p.onGround
+    const prevX = p.x
+    const prevY = p.y
     p.x += p.vx * dt
     p.vy += GRAVITY * dt
     p.y += p.vy * dt
 
-    const ground = groundHeightAt(this.seed, p.x)
-    if (p.y >= ground) {
+    // Vertical: the ground, or the roof of a wrecked car.
+    const support = this.supportHeight(p.x, prevY)
+    if (p.y >= support.height) {
       if (!wasGrounded && p.vy > 220) {
         this.burst(p.x, p.y, 6, {
           color: '#64614f',
@@ -572,17 +583,36 @@ export class GameEngine {
           gravity: 40,
         })
       }
-      p.y = ground
+      if (support.car && !wasGrounded) {
+        // Landing on a wreck: a heavy thump and a puff of dust.
+        this.burst(p.x, p.y, 7, {
+          color: '#55524a',
+          speed: 26,
+          life: 0.32,
+          size: 1,
+          gravity: 30,
+        })
+        sound.thud()
+      }
+      p.y = support.height
       p.vy = 0
       p.onGround = true
-    } else if (wasGrounded && p.vy >= 0 && ground - p.y < 7) {
+      if (support.car && !this.sawCarHint) {
+        this.sawCarHint = true
+        this.setToast('WRECKED CAR · THEY CANNOT CLIMB UP HERE', 'good')
+      }
+    } else if (wasGrounded && p.vy >= 0 && support.height - p.y < 7) {
       // Glue to gentle uphill slopes instead of micro-hopping.
-      p.y = ground
+      p.y = support.height
       p.vy = 0
       p.onGround = true
     } else {
       p.onGround = false
     }
+
+    // Horizontal: wrecked cars are solid. You cannot walk through one, you
+    // have to get on top of it.
+    this.resolvePlayerCars(prevX)
 
     if (p.onGround) {
       p.walkPhase += dt * (p.moving ? (canCrouch ? 6 : 11) : 2.2)
@@ -597,6 +627,76 @@ export class GameEngine {
 
     if (p.hurt > 0.22 && p.onGround) {
       p.vx = approach(p.vx, 0, 260 * dt)
+    }
+  }
+
+  /**
+   * The surface the player would land on at `x`: the terrain, or the roof of a
+   * wrecked car when the player is above it.
+   */
+  private supportHeight(x: number, prevFeet: number): { height: number; car: CarObstacle | null } {
+    let height = groundHeightAt(this.seed, x)
+    let car: CarObstacle | null = null
+    for (const wreck of this.cars) {
+      if (x <= wreck.x - wreck.halfW || x >= wreck.x + wreck.halfW) continue
+      // Only a player that came from above can land on the roof.
+      if (prevFeet > wreck.top + 0.5) continue
+      if (wreck.top < height) {
+        height = wreck.top
+        car = wreck
+      }
+    }
+    return { height, car }
+  }
+
+  /** Keeps the player out of wrecked cars. Their feet must clear the roof. */
+  private resolvePlayerCars(prevX: number): void {
+    const p = this.player
+    const half = p.w * 0.5
+    for (const wreck of this.cars) {
+      if (p.y <= wreck.top + 0.5) continue
+      if (p.x + half <= wreck.x - wreck.halfW || p.x - half >= wreck.x + wreck.halfW) continue
+      p.x =
+        prevX <= wreck.x - wreck.halfW
+          ? wreck.x - wreck.halfW - half
+          : wreck.x + wreck.halfW + half
+    }
+  }
+
+  /** True while the survivor is standing on the roof of a wreck. */
+  private playerOnCar(): boolean {
+    const p = this.player
+    for (const wreck of this.cars) {
+      if (p.x <= wreck.x - wreck.halfW || p.x >= wreck.x + wreck.halfW) continue
+      if (Math.abs(p.y - wreck.top) <= 1.5) return true
+    }
+    return false
+  }
+
+  /** The dead cannot climb: they stop at the wreck and wait underneath it. */
+  private resolveZombieCars(z: Zombie, prevX: number): void {
+    const half = z.w * 0.5
+    for (const wreck of this.cars) {
+      if (z.y <= wreck.top + 0.5) continue
+      if (z.x + half <= wreck.x - wreck.halfW || z.x - half >= wreck.x + wreck.halfW) continue
+      z.x =
+        prevX <= wreck.x - wreck.halfW
+          ? wreck.x - wreck.halfW - half
+          : wreck.x + wreck.halfW + half
+      z.vx = 0
+    }
+  }
+
+  /** After the crowd pushes, nobody may end up standing inside a wreck. */
+  private pushZombiesOutOfCars(): void {
+    for (const z of this.zombies) {
+      if (z.state === 'die') continue
+      const half = z.w * 0.5
+      for (const wreck of this.cars) {
+        if (z.y <= wreck.top + 0.5) continue
+        if (z.x + half <= wreck.x - wreck.halfW || z.x - half >= wreck.x + wreck.halfW) continue
+        z.x = z.x < wreck.x ? wreck.x - wreck.halfW - half : wreck.x + wreck.halfW + half
+      }
     }
   }
 
@@ -847,7 +947,10 @@ export class GameEngine {
           z.hasStruck = true
           const reach = (z.type === 'brute' ? 22 : 17) + PLAYER_W * 0.5
           const verticalOk = p.y > z.y - z.h - 4 && p.y - p.h - 4 < z.y
-          if (Math.abs(p.x - z.x) < reach && verticalOk) {
+          // Wrecked cars are a hard cover: the dead cannot reach a survivor
+          // who is standing on the roof.
+          const reachable = !this.playerOnCar()
+          if (Math.abs(p.x - z.x) < reach && verticalOk && reachable) {
             this.damagePlayer(z.damage, z.x)
           } else {
             this.burst(z.x + z.facing * 9, z.y - z.h * 0.6, 3, {
@@ -866,7 +969,9 @@ export class GameEngine {
         }
       }
 
+      const prevZx = z.x
       z.x += z.vx * dt
+      this.resolveZombieCars(z, prevZx)
       z.vy += GRAVITY * dt
       z.y += z.vy * dt
       const ground = groundHeightAt(this.seed, z.x)
@@ -914,6 +1019,9 @@ export class GameEngine {
         }
       }
     }
+
+    // The crowd shove must not push anybody inside a wreck.
+    this.pushZombiesOutOfCars()
 
     this.zombies = this.zombies.filter((z) => {
       if (z.hp <= -900) return false
@@ -1189,16 +1297,47 @@ export class GameEngine {
     this.ensureChunks()
     const first = Math.floor((this.cameraX - VIEW_W) / CHUNK_W)
     const last = Math.floor((this.cameraX + VIEW_W * 2) / CHUNK_W)
+    let changed = false
     for (const key of this.chunks.keys()) {
-      if (key < first - 1 || key > last + 1) this.chunks.delete(key)
+      if (key < first - 1 || key > last + 1) {
+        this.chunks.delete(key)
+        changed = true
+      }
     }
+    if (changed) this.rebuildCars()
   }
 
   private ensureChunks(): void {
     const first = Math.floor((this.cameraX - VIEW_W * 0.75) / CHUNK_W)
     const last = Math.floor((this.cameraX + VIEW_W * 1.75) / CHUNK_W)
+    let changed = false
     for (let i = first; i <= last; i += 1) {
-      if (!this.chunks.has(i)) this.chunks.set(i, generateChunk(this.seed, i))
+      if (!this.chunks.has(i)) {
+        this.chunks.set(i, generateChunk(this.seed, i))
+        changed = true
+      }
+    }
+    if (changed) this.rebuildCars()
+  }
+
+  /**
+   * Rebuilds the list of solid cars from the loaded chunks.
+   *
+   * The collision box is derived from the same constants the renderer uses, so
+   * the visible wreck and the blocking volume can never drift apart.
+   */
+  private rebuildCars(): void {
+    this.cars = []
+    for (const chunk of this.chunks.values()) {
+      for (const prop of chunk.props) {
+        if (prop.kind !== 'car') continue
+        const base = groundHeightAt(this.seed, prop.x)
+        this.cars.push({
+          x: prop.x,
+          halfW: (CAR_W * prop.scale) / 2,
+          top: base - CAR_H * prop.scale,
+        })
+      }
     }
   }
 

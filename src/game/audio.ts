@@ -139,6 +139,12 @@ export class SoundKit {
     this.tone('triangle', 0.25, 320, 0.05, 640)
   }
 
+  /** Landing hard on a wrecked car roof. */
+  thud(): void {
+    this.noise(0.2, 'lowpass', 420, 0.15, 110)
+    this.tone('sine', 0.16, 92, 0.09, 44)
+  }
+
   wave(): void {
     this.tone('sawtooth', 0.7, 72, 0.09, 58, 0.12)
     this.tone('sawtooth', 0.6, 96, 0.05, 72, 0.18)
