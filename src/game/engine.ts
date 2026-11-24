@@ -169,6 +169,11 @@ export class GameEngine {
   aimWorldY = VIEW_H * 0.55
   /** Id of the zombie currently under the reticle, if any. */
   aimTargetId: number | null = null
+  /**
+   * Opt-in aim assist for keyboard and touch fire. Off by default on every
+   * device; players enable it in the settings section. Mouse aim overrides it.
+   */
+  autoAim = false
   /** Short-lived cross at a confirmed projectile hit. */
   hitMarker: { x: number; y: number; life: number } | null = null
   private toastId = 0
@@ -268,6 +273,19 @@ export class GameEngine {
     this.selectWeapon(WEAPON_ORDER[next])
   }
 
+  /**
+   * Turns the keyboard/touch aim assist on or off. This is a session setting:
+   * it survives restarts and menu returns, and is never written to storage.
+   */
+  setAutoAim(enabled: boolean): void {
+    this.autoAim = enabled
+    if (!enabled) this.aimTargetId = null
+  }
+
+  toggleAutoAim(): void {
+    this.setAutoAim(!this.autoAim)
+  }
+
   weld(): void {
     if (this.phase !== 'playing' || this.weldCooldown > 0) return
     const p = this.player
@@ -321,6 +339,7 @@ export class GameEngine {
       bestMultiplier: this.bestMultiplier,
       canWeld: this.materials >= WELD_COST && p.hp < p.maxHp,
       muted,
+      autoAim: this.autoAim,
       toast: this.toast ? { ...this.toast } : null,
     }
   }
@@ -460,30 +479,34 @@ export class GameEngine {
       return
     }
 
-    // Keyboard / touch fallback: track the closest live threat automatically.
-    let target: Zombie | null = null
-    let best = 300
-    for (const z of this.zombies) {
-      if (z.state === 'die') continue
-      const d = Math.hypot(z.x - pivot.x, z.y - z.h * 0.52 - pivot.y)
-      if (d < best) {
-        best = d
-        target = z
+    // Manual fallback: aim straight ahead. Auto-aim is opt-in, so keyboard and
+    // touch fire only track a target when the player has enabled it.
+    if (this.autoAim) {
+      let target: Zombie | null = null
+      let best = 300
+      for (const z of this.zombies) {
+        if (z.state === 'die') continue
+        const d = Math.hypot(z.x - pivot.x, z.y - z.h * 0.52 - pivot.y)
+        if (d < best) {
+          best = d
+          target = z
+        }
+      }
+      if (target) {
+        const tx = target.x
+        const ty = target.y - target.h * 0.52
+        this.aimWorldX = tx
+        this.aimWorldY = ty
+        this.aimTargetId = target.id
+        p.aim = Math.atan2(ty - pivot.y, tx - pivot.x)
+        p.facing = tx >= pivot.x ? 1 : -1
+        return
       }
     }
-    if (target) {
-      const tx = target.x
-      const ty = target.y - target.h * 0.52
-      this.aimWorldX = tx
-      this.aimWorldY = ty
-      this.aimTargetId = target.id
-      p.aim = Math.atan2(ty - pivot.y, tx - pivot.x)
-      p.facing = tx >= pivot.x ? 1 : -1
-    } else {
-      this.aimWorldX = pivot.x + p.facing * 260
-      this.aimWorldY = pivot.y
-      p.aim = p.facing === 1 ? 0 : Math.PI
-    }
+
+    this.aimWorldX = pivot.x + p.facing * 260
+    this.aimWorldY = pivot.y
+    p.aim = p.facing === 1 ? 0 : Math.PI
   }
 
   /** Hand pivot used by the survivor sprite and by every projectile. */

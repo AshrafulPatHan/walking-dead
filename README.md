@@ -18,6 +18,7 @@
    - 3.6 [Loot, welding and the economy](#36-loot-welding-and-the-economy)
    - 3.7 [Score, combo and progress](#37-score-combo-and-progress)
    - 3.8 [The world](#38-the-world)
+   - 3.9 [Settings](#39-settings)
 4. [Architecture](#4-architecture)
 5. [Frame lifecycle](#5-frame-lifecycle)
 6. [File-by-file walkthrough](#6-file-by-file-walkthrough)
@@ -118,17 +119,18 @@ src/components/Icons.tsx
 | Jump | `Space` / `W` / `↑` | ▲ |
 | Crouch | `S` / `↓` | ▼ |
 | Fire | Left mouse button, or `F` / `J` | FIRE |
-| Aim | Mouse | Auto-aim at nearest zombie |
+| Aim | Mouse | Straight ahead (auto-aim optional) |
 | Weapon | `1` / `2` / `3`, `Q` cycles | “Swap gun” |
 | Weld armor | `H` | HUD button |
 | Pause / resume | `Esc` / `P` | HUD button |
 | Start / restart | `Enter` (restart), `R` on death | overlay buttons |
 | Mute | `M` or speaker button | HUD button |
+| Auto-aim | Settings section (start / pause) | Settings section (start / pause) |
 
 Extra details:
 
-- If mouse aiming has not been activated (keyboard-only or touch), firing **auto-aims at the closest live zombie**.
-- As soon as you move the physical mouse, true mouse aiming takes over; keyboard fire then follows the cursor too.
+- **Auto-aim is OFF by default on every device.** Enable it in the settings section on the start screen or pause screen. When enabled, keyboard and touch fire track the closest live zombie within 300 px; when disabled, they fire straight ahead in the direction you face.
+- As soon as you move the physical mouse, true mouse aiming takes over and always overrides auto-aim.
 - Losing window focus automatically pauses a running game and clears all held inputs.
 - Crouching is only possible while grounded. It lowers your hitbox and tightens gun spread.
 
@@ -294,6 +296,16 @@ Every third chunk in a region may roll a landmark (water tower or carriage + hou
 The car is solid at ground level: you cannot walk through it, and neither can the dead. The only way past is to **jump onto the roof** (`CAR_H = 30` px tall, comfortably under the jump apex). Zombies cannot climb, cannot cross the wreck and cannot land melee hits on a survivor standing on the roof, which makes a car a perfect firing platform — a short toast explains this the first time you land on one.
 
 Everything else is **purely visual**: benches, fences, gravestones and the rest do not collide. Only the ground and the wrecked cars are solid. Section [7.9](#79-wrecked-cars-line-by-line) explains the implementation step by step.
+
+### 3.9 Settings
+
+The start screen and the pause screen both include a **Settings** panel. It currently holds one option:
+
+- **Auto-aim** — `OFF` by default on every device, including phones. Use the `OFF` / `ON` segments to change it.
+  - `ON`: keyboard and touch fire lock onto the closest live zombie within 300 px, aiming at its torso.
+  - `OFF`: keyboard and touch fire go straight ahead in the direction the survivor faces.
+  - Mouse aim always takes priority over both, so the setting never affects a player who is using the pointer.
+  - The choice survives restarts and returning to the menu, but it is **session only** — nothing is written to storage, matching the game's no-save rule.
 
 ---
 
@@ -500,7 +512,7 @@ This file has no runtime code. It is the shared vocabulary for the engine, rende
 | `Toast` | Centered HUD message with tone and lifetime |
 | `InputState` | Held directions, fire, logical aim point, mouse-active flag |
 | `WeaponHud` | Weapon card data: id, name, ammo, active, slot, kind |
-| `HudState` | Complete React-facing snapshot: phase, seed, health, weapons, materials, score, kills, distance, time, wave, streak, multiplier, weld availability, mute, toast |
+| `HudState` | Complete React-facing snapshot: phase, seed, health, weapons, materials, score, kills, distance, time, wave, streak, multiplier, weld availability, mute, auto-aim flag, toast |
 
 Two conventions matter:
 
@@ -829,6 +841,7 @@ Run state:
 - `spawnTimer`
 - `toast`, `weldCooldown`
 - `aimWorldX/Y`, `aimTargetId`, `hitMarker`
+- `autoAim` — the opt-in keyboard/touch aim assist (default `false`)
 
 Private bookkeeping:
 
@@ -898,12 +911,19 @@ Two modes:
 - If the cursor is more than 8 px from the hand pivot, recompute `aimAngle` toward it. Otherwise keep the previous angle, which prevents jitter when the cursor sits on the pivot.
 - Facing follows the horizontal component unless the aim is nearly vertical (`|cos| > 0.18`).
 - Hover detection checks every live zombie's torso rectangle expanded by 3 px. The first match becomes `aimTargetId` for the reticle lock.
+- Mouse mode always wins, regardless of the auto-aim setting.
 
-**Auto-aim mode** (keyboard/touch, or before the mouse moves)
+**Keyboard / touch mode** (`input.mouseActive === false`)
 
-- Find the nearest live zombie to the pivot, measured to torso centre, within 300 px.
-- If found, aim at its torso and set `aimTargetId`.
-- If not, aim straight ahead 260 px.
+- If `autoAim` is enabled:
+  - find the nearest live zombie to the pivot, measured to torso centre, within 300 px,
+  - if found, aim at its torso and set `aimTargetId`,
+  - if none, fall through to straight-ahead aim.
+- If `autoAim` is disabled (the default):
+  - no target search happens,
+  - `aimTargetId` stays `null`,
+  - aim straight ahead 260 px: `aimWorldX = pivot.x + facing * 260`, `aimWorldY = pivot.y`, angle `0` or `π`.
+- `engine.setAutoAim(enabled)` / `toggleAutoAim()` flips the flag; turning it off clears any target lock immediately. The flag is not touched by `reset()`, so it survives restarts.
 
 `aimPivot()`:
 
@@ -1637,10 +1657,11 @@ Each action calls the matching engine method and then `sync()`:
 - `pause` / `resume` / `togglePause` respect current phase.
 - `toMenu` resets to menu.
 - `selectWeapon` / `cycleWeapon` / `weld` call the engine.
+- `setAutoAim(enabled)` / `toggleAutoAim()` call the matching engine method and sync, so the settings section updates instantly.
 - `setVirtual(control, pressed)`:
   - unlocks audio on press,
   - writes directly into `engine.input[control]`,
-  - pressing fire via touch sets `mouseActive = false` so auto-aim takes over.
+  - pressing fire via touch sets `mouseActive = false`, which puts aiming into keyboard/touch mode. That mode uses auto-aim only when the setting is ON; otherwise it fires straight ahead.
 
 #### The main effect
 
@@ -1841,16 +1862,23 @@ A pure presentational HUD. It does not touch the engine.
   - field-manual grid: move, jump, crouch, fire, weapons, aim, weld, pause,
   - compact mode for pause,
   - hidden on short viewports via `.manual-on-tall`.
+- `SettingsSection`
+  - the small settings panel shared by the start and pause screens,
+  - an `Auto-aim` row with `OFF` / `ON` segmented buttons (`aria-pressed`),
+  - reads `hud.autoAim` and calls `actions.setAutoAim`,
+  - notes that the choice is session-only.
 - `StartScreen`
   - left-side gradient over the live menu scene,
   - title, tagline, tags,
   - controls,
+  - settings,
   - “START RUN” button (Enter),
   - “fresh terrain every run” note and audio toggle.
 - `PauseScreen`
   - seed display,
   - distance / kills / score summary,
   - compact controls,
+  - settings,
   - Resume (Esc), Restart (new terrain), Abandon run.
 - `DeathScreen`
   - run-terminated header, seed,
@@ -1872,10 +1900,10 @@ All overlays are absolutely positioned over the canvas; on mobile/coarse pointer
   - context menu suppressed.
 - Layout:
   - left cluster: jump on top, left / crouch / right below,
-  - right cluster: “Swap gun”, large FIRE button, “Auto aim” hint.
+  - right cluster: “Swap gun”, large FIRE button, `Auto aim on/off` hint.
 - `.touch-only` hides the whole component unless the device reports a coarse pointer.
 - Holding fire is intentional for the machine gun.
-- Touch fire disables mouse aim, so the engine targets the nearest zombie.
+- Touch fire disables mouse aim, so aiming follows the `autoAim` setting: nearest zombie when ON, straight ahead when OFF.
 
 #### `Icons.tsx`
 
@@ -2694,7 +2722,8 @@ The hook is stripped from production builds by `import.meta.env.DEV`.
 ### Common gotchas
 
 - **The game pauses when the window loses focus.** This is deliberate (`blur` / `visibilitychange`). Screenshots taken while another window is focused will show a paused frame.
-- **The reticle only draws while `phase === 'playing'` and `mouseActive === true`.** Keyboard/touch players use auto-aim and see no mouse reticle.
+- **The reticle only draws while `phase === 'playing'` and `mouseActive === true`.** Keyboard/touch players aim straight ahead (or at a locked target when auto-aim is enabled) and see no mouse reticle.
+- **Auto-aim is off by default.** It is opt-in via the settings section on the start and pause screens; nothing is persisted, so every fresh page load starts with it off again.
 - **Bullets are culled 80 px outside the camera.** Off-screen shots are not simulated for long.
 - **HUD updates every ~70 ms, not every frame.** A value may lag the simulation slightly in React.
 - **Distance is in metres, not pixels.** `HudState.distance = maxProgress / 8`.
@@ -2727,6 +2756,10 @@ The build script already runs `tsc` first. The production output is `dist/`.
 - Weld at 40 materials: +25 HP, cooldown, toast.
 - Survive 42 s: wave toast and burst spawn.
 - Walk into a wrecked car: you stop at the body; jump onto the roof, then shoot the zombies crowding below.
+- Start screen shows the Settings panel with Auto-aim set to OFF; start a run, press F near a zombie, and check the shot goes straight ahead.
+- Pause, flip Auto-aim to ON, resume, and fire near a zombie: the shot should track it. Turn it back to OFF and confirm it stops tracking.
+- Move the mouse mid-run: cursor aim takes over even with Auto-aim ON.
+- On a touch device the FIRE button hint reads `Auto aim off` until it is enabled.
 - Run in one direction for a minute: zombies still arrive from behind.
 - Pause/resume; blur the window; verify auto-pause.
 - Die: corpse, death screen, stats, restart gives a new map.
@@ -2757,9 +2790,15 @@ The wrecked cars are the deliberate exception: they are large enough to read as 
 
 Because a car is a wall with a roof, and the game only ever grants roof support when the feet came from above. Zombies have no jump at all; their side collision simply pushes them back out of the body. That makes a roof a safe firing platform by design: the player must jump up, and the dead can only crowd underneath. The `reachable` check in the attack state also prevents a lucky arm swing from hitting someone standing on top.
 
-### Why does the game auto-aim on keyboard/touch?
+### Why is auto-aim off by default?
 
-A twin-stick or mouse aim is not available on a phone, and keyboard-only players have no cursor. Auto-aim at the nearest threat keeps the game playable while mouse users retain precise control. Touch fire explicitly sets `mouseActive = false` to switch modes.
+Because it is a preference, not a requirement. Keyboard-only and touch players *can* use it — there is no cursor on a phone — but locking onto a target changes how the game feels and removes the need to line up a shot. Rather than decide that for the player, the game ships with it **OFF** on every device and exposes a single `OFF` / `ON` switch in the settings section.
+
+When it is ON, keyboard and touch fire lock onto the nearest live zombie within 300 px, which keeps the game playable on a phone. When it is OFF, fire goes straight ahead in the direction the survivor faces, so movement and facing do the aiming. Mouse aim is unaffected either way: it always overrides the setting.
+
+### Why is the setting session-only?
+
+The game deliberately has no save file: every run starts from a fresh seed. Persisting one accessibility toggle would be odd in that design, so the flag lives in `engine.autoAim` and seeds its HUD value from `false` on every page load. It does survive restarts and returns to the menu within the session, because `reset()` does not touch it.
 
 ### Why does the reticle match the spread?
 

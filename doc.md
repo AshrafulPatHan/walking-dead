@@ -23,14 +23,14 @@ Requires Node 18+.
 | Jump | `Space` / `W` / `↑` |
 | Crouch | `S` / `↓` |
 | Fire | Left mouse button (or `F` / `J`) |
-| Aim | Mouse |
+| Aim | Mouse (auto-aim optional, off by default) |
 | Swap weapon | `1` / `2` / `3`, `Q` cycles |
 | Weld armor (+25 HP, 40 materials) | `H` |
 | Pause / resume | `Esc` / `P` |
 | Start / restart | `Enter` |
 | Mute | `M` or the speaker button |
 
-On touch devices, on-screen controls appear automatically (left/right/jump/crouch plus fire). Firing without a mouse auto-aims at the nearest zombie.
+On touch devices, on-screen controls appear automatically (left/right/jump/crouch plus fire). Auto-aim is **off by default**; enable it in the settings section on the start or pause screen if you want keyboard and touch fire to lock onto the nearest zombie.
 
 ## Features
 
@@ -41,6 +41,7 @@ On touch devices, on-screen controls appear automatically (left/right/jump/crouc
 - **New map every run** — the seed is regenerated on launch and on every restart; no progress or terrain is persisted.
 - **Three weapons** — infinite-range metal pipe (melee), pistol (120 rounds, precise), machine gun (500 rounds, rapid, wide spread).
 - **True mouse aiming** — projectiles spawn at the barrel tip and travel to the world-space cursor, with spread matching the drawn reticle, a target lock and hit markers.
+- **Optional auto-aim** — off by default on every device; switch it on in the settings section on the start or pause screen to make keyboard and touch fire track the nearest zombie. Mouse aim always overrides it.
 - **Three zombie types** — walkers, fast runners and tanky brutes with idle → chase → attack → die state machines, plus wave escalation and spawn caps.
 - **Two-sided pressure** — spawns alternate flanks regardless of travel direction, and trailing flankers get a short catch-up sprint so running away never makes the horde one-sided.
 - **Loot loop** — kills drop building materials, which repair armor at the weld station; occasional ammo and medkit pickups also drop.

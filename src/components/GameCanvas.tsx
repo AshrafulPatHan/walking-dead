@@ -27,7 +27,7 @@ export function GameCanvas() {
       <div className="stage-vignette pointer-events-none absolute inset-0 z-10" />
 
       {showHud && <UIHUD hud={hud} actions={actions} />}
-      {hud.phase === 'playing' && <TouchControls actions={actions} />}
+      {hud.phase === 'playing' && <TouchControls actions={actions} autoAim={hud.autoAim} />}
       {hud.phase === 'menu' && <StartScreen hud={hud} actions={actions} />}
       {hud.phase === 'paused' && <PauseScreen hud={hud} actions={actions} />}
       {hud.phase === 'dead' && <DeathScreen hud={hud} actions={actions} />}

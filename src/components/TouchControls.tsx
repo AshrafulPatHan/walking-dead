@@ -38,7 +38,13 @@ function HoldButton({
   )
 }
 
-export function TouchControls({ actions }: { actions: GameActions }) {
+export function TouchControls({
+  actions,
+  autoAim,
+}: {
+  actions: GameActions
+  autoAim: boolean
+}) {
   return (
     <div className="touch-only pointer-events-none absolute inset-x-0 bottom-14 z-[25] items-end justify-between px-3">
       <div className="pointer-events-auto grid grid-cols-3 grid-rows-2 gap-1">
@@ -90,7 +96,7 @@ export function TouchControls({ actions }: { actions: GameActions }) {
           className="flex h-16 w-16 flex-col items-center justify-center gap-0.5 border-amber-rail/60 text-[10px] text-amber-rail"
         />
         <span className="pr-1 font-pixel text-[5px] uppercase tracking-[0.14em] text-bone-faint">
-          Auto aim
+          {autoAim ? 'Auto aim on' : 'Auto aim off'}
         </span>
       </div>
     </div>

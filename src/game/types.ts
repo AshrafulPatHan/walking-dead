@@ -247,5 +247,7 @@ export interface HudState {
   bestMultiplier: number
   canWeld: boolean
   muted: boolean
+  /** Opt-in aim assist for keyboard and touch fire. Off by default. */
+  autoAim: boolean
   toast: Toast | null
 }

@@ -18,6 +18,8 @@ export interface GameActions {
   cycleWeapon: () => void
   weld: () => void
   toggleMute: () => void
+  setAutoAim: (enabled: boolean) => void
+  toggleAutoAim: () => void
   setVirtual: (control: VirtualControl, pressed: boolean) => void
 }
 
@@ -85,6 +87,14 @@ export function useGameEngine(canvasRef: React.RefObject<HTMLCanvasElement>): Us
         sync()
       },
       toggleMute,
+      setAutoAim: (enabled: boolean) => {
+        engine.setAutoAim(enabled)
+        sync()
+      },
+      toggleAutoAim: () => {
+        engine.toggleAutoAim()
+        sync()
+      },
       setVirtual: (control, pressed) => {
         if (pressed) sound.unlock()
         engine.input[control] = pressed

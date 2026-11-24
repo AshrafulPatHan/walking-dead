@@ -56,6 +56,52 @@ function ControlSheet({ compact = false }: { compact?: boolean }) {
   )
 }
 
+function SettingsSection({ hud, actions }: { hud: HudState; actions: GameActions }) {
+  return (
+    <div className="border border-bone/15 bg-ink-950/50">
+      <div className="flex items-center justify-between border-b border-bone/10 px-3 py-2">
+        <span className="font-pixel text-[8px] uppercase tracking-[0.18em] text-bone-dim">
+          Settings
+        </span>
+        <span className="font-pixel text-[7px] uppercase tracking-[0.12em] text-bone-faint">
+          Session only
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3 px-3 py-3">
+        <div className="min-w-0">
+          <div className="font-pixel text-[8px] uppercase tracking-[0.1em] text-bone-dim">
+            Auto-aim
+          </div>
+          <p className="mt-1 font-pixel text-[7px] leading-relaxed text-bone-faint">
+            Keyboard and touch fire track the nearest zombie. Mouse aim always overrides it.
+          </p>
+        </div>
+        <div
+          role="group"
+          aria-label="Auto-aim"
+          className="flex shrink-0 border border-bone/20 bg-ink-800/70"
+        >
+          {[false, true].map((value) => (
+            <button
+              key={String(value)}
+              type="button"
+              aria-pressed={hud.autoAim === value}
+              onClick={() => actions.setAutoAim(value)}
+              className={`h-6 px-2 font-pixel text-[8px] uppercase tracking-[0.1em] transition-colors ${
+                hud.autoAim === value
+                  ? 'bg-amber-rail text-ink-950'
+                  : 'text-bone-faint hover:text-bone-dim'
+              }`}
+            >
+              {value ? 'ON' : 'OFF'}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function StartScreen({ hud, actions }: { hud: HudState; actions: GameActions }) {
   return (
     <div className="stage-overlay stage-overlay-backdrop absolute inset-0 z-30 overflow-y-auto bg-[linear-gradient(90deg,rgba(4,7,12,0.98)_0%,rgba(4,7,12,0.94)_30%,rgba(4,7,12,0.62)_50%,rgba(4,7,12,0.14)_67%,rgba(4,7,12,0)_100%)]">
@@ -91,6 +137,10 @@ export function StartScreen({ hud, actions }: { hud: HudState; actions: GameActi
 
           <div className="manual-on-tall mt-4">
             <ControlSheet />
+          </div>
+
+          <div className="mt-3">
+            <SettingsSection hud={hud} actions={actions} />
           </div>
 
           <button
@@ -164,6 +214,10 @@ export function PauseScreen({ hud, actions }: { hud: HudState; actions: GameActi
 
           <div className="manual-on-tall mt-4">
             <ControlSheet compact />
+          </div>
+
+          <div className="mt-3">
+            <SettingsSection hud={hud} actions={actions} />
           </div>
 
           <div className="mt-4 space-y-2">
